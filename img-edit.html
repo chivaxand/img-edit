@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ImgEdit</title>
+<style>
+:root {
+    --bg-color: #1e1e1e;
+    --panel-color: #252526;
+    --accent-color: #007acc;
+    --text-color: #cccccc;
+    --border-color: #3e3e42;
+    --hover-color: #2d2d30;
+    --font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+body { margin: 0; padding: 0; background: var(--bg-color); color: var(--text-color); font-family: var(--font-family); font-size: 13px; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+/* Layout */
+#app-header { height: 30px; background: var(--panel-color); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; padding: 0 10px; gap: 10px; }
+#app-body { flex: 1; display: flex; overflow: hidden; }
+#toolbar { width: 46px; background: var(--panel-color); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; align-items: center; padding-top: 10px; flex-shrink: 0; }
+#workspace { flex: 1; background: #111; position: relative; overflow: auto; display: flex; }
+#sidebar { width: 260px; background: var(--panel-color); border-left: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+
+/* Components */
+.panel-section { padding: 10px; border-bottom: 1px solid var(--border-color); }
+.panel-header { font-weight: bold; margin-bottom: 8px; color: #fff; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center; }
+.row { display: flex; gap: 5px; margin-bottom: 5px; align-items: center; }
+label { color: #aaa; font-size: 11px; min-width: 40px; }
+
+/* Inputs */
+input[type=text], input[type=number], select { background: #3c3c3c; border: 1px solid #3c3c3c; color: white; padding: 3px; border-radius: 2px; width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; }
+input[type=text]:focus, input[type=number]:focus, select:focus { border-color: var(--accent-color); outline: none; }
+input[type=range] { width: 100%; cursor: pointer; vertical-align: middle; }
+input[type=checkbox] { margin: 0 5px 0 0; vertical-align: middle; }
+button.btn { background: var(--accent-color); color: white; border: 0; padding: 4px 10px; border-radius: 2px; cursor: pointer; font-size: 11px; }
+button.btn:hover { opacity: 0.9; }
+button.btn-danger { background: #d55; }
+
+/* Toolbar Icons */
+button.icon-btn { background: transparent; border: 1px solid transparent; color: var(--text-color); width: 36px; height: 36px; cursor: pointer; border-radius: 3px; margin-bottom: 2px; font-size: 18px; display: flex; justify-content: center; align-items: center; }
+button.icon-btn:hover { background: var(--hover-color); }
+button.icon-btn.active { background: var(--accent-color); color: white; }
+
+/* Color Picker */
+.color-box { position: relative; width: 36px; height: 36px; margin-top: auto; margin-bottom: 10px; }
+.c-swatch { width: 24px; height: 24px; border: 1px solid #fff; position: absolute; cursor: pointer; }
+input[type=color] { opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; }
+
+/* Layer List */
+#layer-list { flex: 1; overflow-y: auto; min-height: 100px; }
+.layer-item { display: flex; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--border-color); cursor: pointer; background: var(--panel-color); user-select: none; }
+.layer-item.active { background: #37373d; }
+.layer-thumb { width: 30px; height: 30px; background: #fff; margin-right: 10px; border: 1px solid #555; object-fit: contain; display: block; }
+.layer-vis { width: 20px; text-align: center; color: #666; cursor: pointer; margin-right: 5px; }
+.layer-vis.visible { color: #ddd; }
+.layer-type-icon { font-size: 10px; color: #aaa; margin-right: 5px; width: 12px; text-align: center; }
+
+/* Canvas */
+#canvas-container { margin: auto; flex-shrink: 0; box-shadow: 0 0 20px rgba(0,0,0,0.5); background-image: linear-gradient(45deg, #2a2a2a 25%, transparent 25%), linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2a2a 75%), linear-gradient(-45deg, transparent 75%, #2a2a2a 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; }
+canvas { display: block; cursor: crosshair; }
+</style>
+</head>
+<body>
+
+<div id="app-header">
+    <div style="font-weight:bold; margin-right:10px;">ImgEdit</div>
+    <div id="header-controls" style="display:flex; gap:10px; margin-left: auto;"></div>
+    <div style="flex:1"></div>
+    <span id="status-bar" style="font-size:11px; color:#888;"></span>
+</div>
+
+<div id="app-body">
+    <div id="toolbar"></div>
+    <div id="workspace">
+        <div id="canvas-container"><canvas id="main-canvas"></canvas></div>
+    </div>
+    <div id="sidebar">
+        <div class="panel-section" id="tool-settings"></div>
+        <div class="panel-section" id="layer-props"></div>
+        <div class="panel-section" id="canvas-props"></div>
+        <div class="panel-section" style="flex:1; display:flex; flex-direction:column; padding:0;">
+            <div class="panel-header" style="padding:10px;">
+                Layers
+                <div style="display:flex; gap:2px;">
+                    <button class="btn" id="btn-layer-up" title="Move Up">↑</button>
+                    <button class="btn" id="btn-layer-down" title="Move Down">↓</button>
+                    <button class="btn" id="btn-add-layer" title="New Layer" style="margin-left:5px;">+</button>
+                    <button class="btn btn-danger" id="btn-del-layer" title="Delete Layer">-</button>
+                </div>
+            </div>
+            <div id="layer-list"></div>
+        </div>
+        <div style="padding:10px; border-top:1px solid var(--border-color);">
+            <button class="btn" style="width:100%" id="btn-open">Open / Add Image</button>
+            <input type="file" id="file-upload" style="display:none">
+        </div>
+    </div>
+</div>
+
+<script src="dist/bundle.js"></script>
+</body>
+</html>

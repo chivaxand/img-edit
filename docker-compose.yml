@@ -1,0 +1,11 @@
+services:
+  compiler:
+    build: .
+    stop_grace_period: 1s
+    tty: true
+    volumes:
+      - .:/app
+    environment:
+      - WATCHPACK_POLLING=true
+    ports:
+      - "8080:8080"

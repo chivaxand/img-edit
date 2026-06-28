@@ -1,6 +1,6 @@
-import { App } from '../app';
-import { UI } from '../ui';
-import { Layer } from '../layers';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer } from '~/layers';
 
 App.registerTool({
     id: 'crop',
@@ -56,6 +56,7 @@ App.registerTool({
 
         // Resize Canvas (updates state width/height)
         App.actions.resizeCanvas(r.w, r.h);
+        App.recordAction(`api.crop(${r.x}, ${r.y}, ${r.w}, ${r.h});`);
 
         // Reset tool to move
         App.actions.setTool('move');

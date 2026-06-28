@@ -1,6 +1,6 @@
-import { App } from '../app';
-import { UI } from '../ui';
-import { Layers } from '../layers';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layers } from '~/layers';
 
 export const JpegExport = {
     settings: {
@@ -100,6 +100,8 @@ export const JpegExport = {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+
+        App.recordAction(`api.exportJPEG(${this.settings.quality}, '${this.settings.bgColor}');`);
 
         App.popup!.close();
     }

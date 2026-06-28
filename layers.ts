@@ -1,4 +1,4 @@
-import { UI } from './ui';
+import { UI } from '~/ui';
 
 // --- Global Interfaces ---
 export interface Layer {

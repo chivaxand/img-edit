@@ -22,13 +22,7 @@ The application is written using modern ECMAScript Modules (ESM) with explicit `
   import { fft } from './fft';
   import { gif } from './gif';
   
-  export const Lib = { fft, gif };
-  ```
-- **Backward Compatibility:** To prevent breaking unmigrated code, `libs/index.ts` automatically binds the consolidated `Lib` object to the browser's global scope:
-  ```typescript
-  if (typeof window !== 'undefined') {
-      (window as any).Lib = Lib;
-  }
+  export const Lib = { fft, gif, image, kernel, plot, wavelet };
   ```
 
 ### Resolving Circular Dependencies (The Entry Point Pattern)

@@ -1,6 +1,6 @@
-import { App } from '../app';
-import { UI } from '../ui';
-import { Layer } from '../layers';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer } from '~/layers';
 
 // Eyedropper Tool
 App.registerTool({
@@ -215,6 +215,9 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
     }
 };
 
+// Bind to global utils to allow calls from ScriptAPI without duplication
+(App.utils as any).performFloodFill = performFloodFill;
+
 // Flood Fill Tool
 App.registerTool({
     id: 'bucket',
@@ -242,6 +245,7 @@ App.registerTool({
             smooth: this.settings.smoothFill,
             isSelection: false
         });
+        App.recordAction(`api.floodFill(${Math.round(pos.x)}, ${Math.round(pos.y)}, '${App.state.fg}', ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothFill});`);
         App.render();
     }
 });
@@ -275,6 +279,7 @@ App.registerTool({
             App.state.selection.mask = mask;
             App.state.selection.ctx = mask.getContext('2d', { willReadFrequently: true });
             App.state.selection.active = true;
+            App.recordAction(`api.magicWandSelect(${Math.round(pos.x)}, ${Math.round(pos.y)}, ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothSelect});`);
             App.render();
         }
     }

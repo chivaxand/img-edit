@@ -1,7 +1,7 @@
-import { App } from './app';
-import { Filters } from './filters';
-import { JpegExport } from './actions/jpeg-export';
-import { GifExport } from './actions/gif-export';
+import { App } from '~/app';
+import { Filters } from '~/filters';
+import { JpegExport } from '~/actions/jpeg-export';
+import { GifExport } from '~/actions/gif-export';
 
 export interface MenuItemDef {
     label?: string;
@@ -10,6 +10,7 @@ export interface MenuItemDef {
     action?: () => void;
     items?: MenuItemDef[];
     submenu?: MenuItemDef[];
+    order?: number;
 }
 
 export const Menu = {
@@ -31,100 +32,33 @@ export const Menu = {
                 { label: 'Delete Selection (Del)', action: () => App.actions.deleteSelection() }
             ]
         },
-        {
-            label: 'Transform',
-            items: [
-                { label: 'Resize...', action: () => App.actions.openResizeDialog() },
-                { label: 'Skew / Rotate...', action: () => App.actions.openTransformDialog() },
-                { label: 'Flip / Rotate...', action: () => App.actions.openFlipRotateDialog() }
-            ]
-        },
-        {
-            label: 'Generate',
-            items: [
-                { label: 'Noise (White)...', action: () => Filters.run('noise') },
-                { label: 'Blue Noise...', action: () => Filters.run('blue-noise') },
-                { label: 'Perlin Noise...', action: () => Filters.run('perlin-noise') }
-            ]
-        },
-        {
-            label: 'Analyze',
-            items: [
-                { label: 'Forensic...', action: () => Filters.run('forensic') },
-                { label: 'Spectral Analysis...', action: () => Filters.run('spectral') },
-                { label: 'DCT Histograms...', action: () => Filters.run('dct') },
-                { label: 'Wavelet Decomposition...', action: () => Filters.run('wavelet') },
-                { label: 'RGB Cube...', action: () => Filters.run('rgb-cube') },
-                { label: 'Focus Map...', action: () => Filters.run('focusmap') },
-                { label: 'Normal Map...', action: () => Filters.run('normalmap') },
-            ]
-        },
+        { label: 'Transform', items: [] },
+        { label: 'Generate', items: [] },
+        { label: 'Analyze', items: [] },
         {
             label: 'Filter',
             items: [
-                { label: 'Blur', submenu: [
-                    { label: 'Gaussian Blur...', action: () => Filters.run('blur') },
-                    { label: 'Bilateral Blur...', action: () => Filters.run('bilateral') }
-                ]},
-                { label: 'Denoise', submenu: [
-                    { label: 'Median...', action: () => Filters.run('median') },
-                    { label: 'Total Variation...', action: () => Filters.run('tv') },
-                    { label: 'Non-Local Means...', action: () => Filters.run('nlm') },
-                    { label: 'BM3D (very slow)...', action: () => Filters.run('bm3d') }
-                ]},
-                { label: 'Enhance', submenu: [
-                    { label: 'Unblur (Wiener)...', action: () => Filters.run('unblur') },
-                    { label: 'Unsharp Mask...', action: () => Filters.run('unsharp-mask') },
-                    { label: 'Smart Sharpen...', action: () => Filters.run('smart-sharpen') },
-                    { label: 'Document Scan...', action: () => Filters.run('document-scan') },
-                ]},
-                { label: 'Edge Detection', submenu: [
-                    { label: 'Canny...', action: () => Filters.run('canny') },
-                    { label: 'Convolution Matrix...', action: () => Filters.run('convolution') },
-                    { label: 'Difference of Gaussians...', action: () => Filters.run('diff-of-gauss') },
-                ]},
-                { label: 'Segmentation', submenu: [
-                    { label: 'Hybrid GrabCut...', action: () => (window as any).GrabCutFilter.open() },
-                    { label: 'Watershed...', action: () => (window as any).WatershedFilter.open() },
-                    { label: 'Superpixels...', action: () => Filters.run('superpixels') },
-                ]},
-                { label: 'Photo', submenu: [
-                    { label: 'Vignette...', action: () => Filters.run('vignette') }
-                ]},
-                { label: 'Stylize', submenu: [
-                    { label: 'Pixelate / Mosaic...', action: () => Filters.run('pixelate') },
-                    { label: 'Dithering...', action: () => Filters.run('dither') },
-                    { label: 'Palette / Quantize...', action: () => Filters.run('palette') },
-                    { label: 'Kuwahara...', action: () => Filters.run('kuwahara') }
-                ]},
-                { label: 'Distort', submenu: [
-                    { label: 'Lens Correction...', action: () => Filters.run('distort-lens-correction') },
-                    { label: 'Twirl...', action: () => Filters.run('distort-twirl') },
-                    { label: 'Ripple...', action: () => Filters.run('distort-ripple') },
-                    { label: 'Water ripple...', action: () => Filters.run('distort-water') },
-                    { label: 'Spherize / Pinch...', action: () => Filters.run('distort-spherize') }
-                ]}
+                { label: 'Blur', submenu: []},
+                { label: 'Denoise', submenu: []},
+                { label: 'Enhance', submenu: []},
+                { label: 'Edge Detection', submenu: []},
+                { label: 'Segmentation', submenu: []},
+                { label: 'Photo', submenu: []},
+                { label: 'Stylize', submenu: []},
+                { label: 'Distort', submenu: []}
+            ]
+        },
+        {
+            label: 'Tone',
+            items: [
+                { type: 'separator', order: 3 },
+                { type: 'separator', order: 10 }
             ]
         },
         {
             label: 'Color',
             items: [
-                { label: 'Grayscale', action: () => Filters.run('grayscale') },
-                { label: 'Invert', action: () => Filters.run('invert') },
-                { label: 'Sepia', action: () => Filters.run('sepia') },
-                { type: 'separator' },
-                { label: 'White Balance...', action: () => Filters.run('whitebalance') },
-                { label: 'Levels...', action: () => Filters.run('levels') },
-                { label: 'Curves...', action: () => Filters.run('curves') },
-                { label: 'Threshold...', action: () => Filters.run('threshold') },
-                { label: 'Exposure...', action: () => Filters.run('exposure') },
-                { label: 'Shadows & Highlights...', action: () => Filters.run('tone') },
-                { label: 'Brightness...', action: () => Filters.run('brightness') },
-                { label: 'Contrast...', action: () => Filters.run('contrast') },
-                { label: 'Saturation...', action: () => Filters.run('saturate') },
-                { label: 'Hue Rotate...', action: () => Filters.run('hue') },
-                { type: 'separator' },
-                { label: 'Chroma Key...', action: () => Filters.run('chromakey') },
+                { type: 'separator', order: 100 }
             ]
         },
         {
@@ -132,13 +66,55 @@ export const Menu = {
             items: [
                 { label: 'New Empty Layer', action: () => App.actions.addEmptyLayer() },
                 { label: 'Duplicate Layer', action: () => App.actions.duplicateLayer() },
-                { label: 'Layer Size...', action: () => App.actions.openLayerCanvasSizeDialog() },
                 { label: 'Merge All Layers', action: () => App.actions.mergeAll() }
+            ]
+        },
+        {
+            label: 'Script',
+            items: [
+                { label: 'Macro Runner...', action: () => App.actions.openMacroRunner() },
+                { label: 'Start/Stop Recording', action: () => App.actions.toggleRecording() },
+                { label: 'Clear Recording', action: () => App.actions.clearRecording() }
             ]
         }
     ] as MenuItemDef[],
 
     activeRoot: null as HTMLElement | null,
+
+    registerDynamicItem(path: string, item: MenuItemDef, order = 100) {
+        const parts = path.split('/');
+        let currentList = this.structure;
+        
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            let found = currentList.find(x => x.label === part);
+            if (!found) {
+                found = { label: part, items: [] };
+                currentList.push(found);
+            }
+            
+            if (i === parts.length - 1) {
+                if (!found.items && !found.submenu) {
+                    found.items = [];
+                }
+                const list = found.items || found.submenu;
+                (item as any).order = order;
+                list!.push(item);
+                
+                list!.sort((a, b) => {
+                    const orderA = (a as any).order !== undefined ? (a as any).order : 1000;
+                    const orderB = (b as any).order !== undefined ? (b as any).order : 1000;
+                    if (orderA !== orderB) return orderA - orderB;
+                    return (a.label || '').localeCompare(b.label || '');
+                });
+            } else {
+                if (!found.items && !found.submenu) {
+                    found.submenu = [];
+                }
+                currentList = found.items || found.submenu!;
+            }
+        }
+    },
 
     init() {
         this.injectCSS();
@@ -156,6 +132,13 @@ export const Menu = {
         });
         
         container.insertBefore(menuBar, container.children[1]);
+        
+        // Expose globally for console debugging
+        (window as any).Menu = Menu;
+    },
+
+    print() {
+        console.log(JSON.stringify(this.structure, null, 2))
     },
 
     createItem(def: MenuItemDef, isRoot = false): HTMLElement {

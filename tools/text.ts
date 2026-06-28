@@ -1,6 +1,6 @@
-import { App } from '../app';
-import { UI } from '../ui';
-import { Layer, Layers } from '../layers';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer, Layers } from '~/layers';
 
 App.registerTool({
     id: 'text',

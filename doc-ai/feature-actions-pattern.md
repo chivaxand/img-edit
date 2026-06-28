@@ -1,22 +1,27 @@
 ---
 title: Action Dialogs and Live Previews
-tags: ["actions", "popup", "preview", "history", "transform"]
+tags: ["actions", "popup", "preview", "history", "recording", "transform"]
 ---
 
 ## Core Concepts
 
-The `App.actions` object contains methods that modify the canvas, layers, or global state. When an action requires a UI dialog with a **Live Preview** (e.g., resizing, skewing, rotating), a strict state-restoration pattern must be followed to avoid corrupting the `App.history` stack.
+`App.actions` houses operations that alter layers, dimensions, or state. Actions requiring configuration inputs (e.g. Resizing, Skewing, Rotating) must follow a strict **State-Restoration Pattern** to keep the preview visual, the history stack pristine, and the macro system recorded.
 
-## Architecture/Rules
+---
 
-1.  **Never mutate the original state permanently during preview.**
-2.  **Save the Original State:** Before applying any temporary transformations to a layer's canvas, cache its original `canvas`, `x`, `y`, `width`, and `height`.
-3.  **The Update Loop:** Create an internal `update()` function that recalculates the transformation from the *original* cached state to a *new temporary* canvas, then assigns it to the layer and calls `App.render()`.
-4.  **Handling Cancel:** If the user clicks Cancel, restore the layer properties from the original cache and call `App.render()`.
-5.  **Handling Apply (Crucial):** 
-    *   Restore the layer to the original cache *first*.
-    *   Call `App.actions.saveState()` so the undo stack records the clean, original state.
-    *   Apply the final transformed state to the layer.
+## Architecture & Rules
+
+1. **Never mutate original state permanently during preview.**
+2. **Cache Original State:** Store copies of original layer properties (`canvas`, `x`, `y`, `width`, `height`) before applying preview adjustments.
+3. **The Preview Update Loop:** Implement a local `update()` function executing the logic on a fresh temporary canvas from the original cached elements, assigning it to the layer, and calling `App.render()`.
+4. **Handling Cancel:** Revert to cached original state and dismiss the popup.
+5. **Handling Apply (Crucial):**
+   - Restore properties to the original cached state first.
+   - Invoke `App.actions.saveState()` to register the "Before" state in the history stack.
+   - Apply the final processed state.
+   - Record the finalized API action via `App.recordAction("api.methodName(...)");` to enable macro reproduction.
+
+---
 
 ## Implementation Template
 
@@ -80,6 +85,9 @@ App.actions.openMyCustomDialog = function() {
         // Re-apply final result
         l.canvas = finalCanvas;
         l.ctx = l.canvas.getContext('2d')!;
+        
+        // 6. Record Macro Step
+        App.recordAction(`api.myCustomAction(${state.value});`);
         
         App.ui.refreshLayers();
         App.popup!.close();

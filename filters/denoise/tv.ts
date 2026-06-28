@@ -6,6 +6,11 @@ import { Lib } from '../../libs/index';
 Filters.register('tv', {
     name: 'Total Variation',
     mode: 'pixel',
+    menu: {
+        path: 'Filter/Denoise',
+        label: 'Total Variation...',
+        order: 2
+    },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
         const state = {

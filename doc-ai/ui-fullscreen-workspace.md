@@ -1,6 +1,6 @@
 ---
 title: Full-Screen Workspace Architecture
-tags: ["ui", "workspace", "fullscreen", "modal", "interactive-filters"]
+tags: ["ui", "workspace", "fullscreen", "modal", "interactive-filters", "registration"]
 ---
 
 ## Core Concepts
@@ -32,13 +32,15 @@ When invoking a full-screen interactive workspace, developers must follow strict
 
 ---
 
-## Implementation Template
+## Unified Filter Registration Template
 
-Below is the standard programmatic recipe for implementing a full-screen interactive filter or custom tool:
+To maintain a clean and unified codebase, full-screen workspaces must be registered as standard Filters using the `apply` callback override. This automatically exposes them to the dynamic menu layout, shortcut systems, and script/macro execution.
 
 ```typescript
-import { App } from '../app';
-import { UI } from '../ui';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer } from '~/layers';
+import { Filters } from '~/filters';
 
 export const MyComplexWorkspaceFilter = {
     open() {
@@ -84,4 +86,18 @@ export const MyComplexWorkspaceFilter = {
         ws.show();
     }
 };
+
+// 5. Dynamic Filter Registration
+Filters.register('my-complex-workspace', {
+    name: 'My Complex Workspace',
+    mode: 'pixel',
+    menu: {
+        path: 'Filter/Segmentation',
+        label: 'My Complex Workspace...',
+        order: 1
+    },
+    apply(l: Layer) {
+        MyComplexWorkspaceFilter.open();
+    }
+});
 ```

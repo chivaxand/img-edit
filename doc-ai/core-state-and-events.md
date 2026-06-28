@@ -1,24 +1,17 @@
 ---
 title: Core Application State and Event Bus
-tags: ["architecture", "app", "state management", "event bus", "history", "keybinds"]
+tags: ["app", "state-management", "event-bus", "history", "keybindings", "recording"]
 ---
 
 ## Core Concepts
 
-The application uses a centralized, mutable global state object (`App.state`) combined with a custom Event Bus (`App.on`, `App.emit`) to trigger UI updates and re-renders. 
+The application uses a centralized, mutable global state object (`App.state`) combined with an Event Bus (`App.on`, `App.emit`) to trigger UI updates and re-renders.
 
-**Strict Rule:** Tools and Filters must never manually manipulate the Canvas DOM or UI panels directly to reflect state changes. They must mutate `App.state` and call `App.emit()` or specific `App.actions`.
+**Strict Rule:** Tools and Filters must never manually manipulate the Canvas DOM or sidebar elements directly to reflect changes. They must mutate `App.state` and call `App.emit()` or specific actions.
 
-## Global Application Structure (`App`)
+---
 
-The global `App` object serves as the backbone of the application, broken into these domains:
-*   `App.state` - The single source of truth for canvas size, active tools, colors, layers, and selections.
-*   `App.actions` - Global mutators. Any external action file (e.g., `/actions/transform.ts`) injects methods here via `Object.assign(App.actions, { ... })`.
-*   `App.utils` - Pure helpers for coordinate mapping, color conversion, and layer lookups.
-*   `App.keybinds` - Centralized keyboard shortcut registry.
-*   `App.history` - Undo/Redo stack manager based on full layer cloning.
-
-## Core State Object Interface (`AppState`)
+## App State Interface Reference (`AppState`)
 
 ```typescript
 interface AppState {
@@ -27,44 +20,61 @@ interface AppState {
     layers: Layer[]; // Index 0 is the TOP visual layer.
     activeLayerId: number | null;
     tool: string; // Current active tool ID
-    fg: string; // Hex color
-    bg: string; // Hex color
+    fg: string; // Foreground Hex color
+    bg: string; // Background Hex color
     settings: Record<string, any>;
     isDrawing: boolean;
     start: { x: number; y: number };
     dragOffset: { x: number; y: number };
-    zoom: number; // 1 = 100%, 0.5 = 50%
+    zoom: number; // Scale factor (e.g. 1 = 100%)
+    recording: boolean; // Flag if macro recording is active
+    recordedSteps: string[]; // Steps recorded as JS api code strings
     selection: { 
         active: boolean; 
         mask: HTMLCanvasElement | null; 
         ctx: CanvasRenderingContext2D | null; 
-        layerId: number | null 
+        layerId: number | null;
+        outline: HTMLCanvasElement | null; // Precomputed boundary outline
+        antOffset: number; // Scrolling dash offset
+        animating: boolean; // Active animation loop state
+        pattern: HTMLCanvasElement | null; // Cached marching ants stroke pattern
+        antsCanvas: HTMLCanvasElement | null; // Offscreen scratch selection canvas
+        antsCtx: CanvasRenderingContext2D | null;
+        showBorder: boolean; // True if outline border should render
     };
 }
 ```
 
+---
+
 ## Standard Event Markers
 
-Always emit these specific events after state modifications:
-*   `App.emit('render')` - Triggers a full canvas redraw (does not update UI panels).
-*   `App.emit('layers:structure')` - Emitted when layers are added, removed, or reordered. Rebuilds the Layer UI panel.
-*   `App.emit('layer:props')` - Emitted when layer opacity, blend mode, or transform coordinates change.
-*   `App.emit('layer:content')` - Emitted when pixel data on a layer changes (updates thumbnails).
-*   `App.emit('tool:change')` - Emitted when the active tool changes.
-*   `App.emit('zoom:change')` - Emitted when canvas scale changes.
-*   `App.emit('canvas:resize')` - Emitted when the global width/height changes.
+Always emit these specific events after state modifications to trigger respective UI updates:
+
+- `'render'` - Full canvas redraw (does not update sidebars).
+- `'layers:structure'` - Triggered when layers are added, removed, duplicated, or reordered. Rebuilds the layer panel.
+- `'layer:props'` - Triggered when opacity, blend mode, coordinates, or selection border visibility changes.
+- `'layer:content'` - Triggered when pixel data on a layer changes (updates thumbnails).
+- `'tool:change'` - Triggered when active tool changes (updates sidebar settings).
+- `'zoom:change'` - Triggered when zoom level changes.
+- `'canvas:resize'` - Triggered when global dimensions change.
+- `'record:update'` - Triggered when macro recording starts, stops, or adds steps.
+
+---
 
 ## History & Undo Lifecycle
 
 The history stack holds deep copies of layer canvases.
-*   **The Anti-Pattern:** Manually caching image data arrays in tool logic to implement custom undo.
-*   **The Solution:** Call `App.actions.saveState()` *before* performing any destructive action (drawing, filtering, moving). The engine automatically snapshots the layers via deep canvas copying and stores them in `App.history.stack` (limit 20).
+- **Save State:** Call `App.actions.saveState()` *before* performing any destructive action (drawing, filtering, transforms).
+- **Undo Operation:** Handled via `App.actions.undo()`. It pops the last snapshot, replaces dimensions and layers, and emits `canvas:resize` and `'layers:structure'`.
+
+---
 
 ## Global Keybindings (`App.keybinds`)
 
-Tools and actions should register keyboard shortcuts via the central keybind registry rather than listening to the window directly.
+Tools and actions register keyboard shortcuts via the central registry:
 ```typescript
 // Key format strictly uses lowercase, optionally combined with standard modifiers
 App.keybinds.register('ctrl+z', () => App.actions.undo());
-App.keybinds.register('delete, backspace', () => App.actions.deleteSelection());
+App.keybinds.register('delete, backspace', () => { if(App.state.selection.active) App.actions.deleteSelection(); });
 ```

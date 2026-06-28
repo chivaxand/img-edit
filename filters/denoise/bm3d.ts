@@ -6,6 +6,11 @@ import { Lib } from '../../libs/index';
 Filters.register('bm3d', {
     name: 'BM3D Denoising',
     mode: 'pixel',
+    menu: {
+        path: 'Filter/Denoise',
+        label: 'BM3D (very slow)...',
+        order: 4
+    },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
         const state = {

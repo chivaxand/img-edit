@@ -1,9 +1,10 @@
-import { App, AppActions } from '../app';
+import { App, AppActions } from '~/app';
 import { coreActions } from './core';
 import { layersActions } from './layers';
-import { transformActions } from './transform';
-import { layerCanvasSizeActions } from './layer-canvas-size';
-import { layerResizeActions } from './layer-resize';
+import { transformActions } from '~/filters/transform/flip-rotate-skew';
+import { layerCanvasSizeActions } from '~/filters/transform/layer-canvas-size';
+import { layerResizeActions } from '~/filters/transform/layer-resize';
+import { scriptActions } from './script';
 
 // Import side-effects for GIF and JPEG export systems
 import './gif-export';
@@ -14,7 +15,8 @@ const allActions: AppActions = {
     ...layersActions,
     ...transformActions,
     ...layerCanvasSizeActions,
-    ...layerResizeActions
+    ...layerResizeActions,
+    ...scriptActions
 };
 
 Object.assign(App.actions, allActions);

@@ -1,6 +1,6 @@
-import { App } from '../app';
-import { UI } from '../ui';
-import { Layer } from '../layers';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer } from '~/layers';
 
 // Shape Tools: Line
 App.registerTool({
@@ -92,6 +92,7 @@ App.registerTool({
             l.ctx.globalCompositeOperation = 'source-over';
         }
 
+        App.recordAction(`api.drawLine(${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, '${this.settings.startCap}', '${this.settings.endCap}', '${App.state.fg}');`);
         App.render();
     },
     drawLineWithCaps(
@@ -295,6 +296,7 @@ App.registerTool({
                 l.ctx.globalCompositeOperation = 'source-over';
             }
             
+            App.recordAction(`api.drawShape('${tool.id}', ${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, ${this.settings.fill}, ${this.settings.useStroke}, ${this.settings.radius});`);
             App.render();
         }
     });

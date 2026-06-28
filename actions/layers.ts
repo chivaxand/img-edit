@@ -1,5 +1,5 @@
-import { App, AppActions } from '../app';
-import { Layers, Layer } from '../layers';
+import { App, AppActions } from '~/app';
+import { Layers, Layer } from '~/layers';
 
 export const layersActions: Pick<AppActions,
     'createLayer' | 'addEmptyLayer' | 'addLayer' | 'addTextLayer' |
@@ -13,6 +13,7 @@ export const layersActions: Pick<AppActions,
 
     addEmptyLayer() { 
         App.actions.addLayer(App.actions.createLayer(`Layer ${App.state.layers.length+1}`)!); 
+        App.recordAction("api.addEmptyLayer();");
     },
 
     addLayer(l: Layer) { 
@@ -59,6 +60,7 @@ export const layersActions: Pick<AppActions,
         App.actions.saveState();
         App.state.layers = App.state.layers.filter(l => l.id !== App.state.activeLayerId);
         App.actions.setActiveLayer(App.state.layers[0].id);
+        App.recordAction("api.deleteActiveLayer();");
     },
 
     setActiveLayer(id: number) { 
@@ -67,6 +69,10 @@ export const layersActions: Pick<AppActions,
             App.actions.setTool('move');
         }
         App.state.activeLayerId = id; 
+        const index = App.state.layers.findIndex(x => x.id === id);
+        if (index >= 0) {
+            App.recordAction(`api.setActiveLayerIndex(${index});`);
+        }
         App.emit('layers:structure'); 
     },
 
@@ -142,6 +148,7 @@ export const layersActions: Pick<AppActions,
         if (newLayer) {
             App.state.layers = [newLayer];
             App.actions.setActiveLayer(newLayer.id);
+            App.recordAction("api.mergeAllLayers();");
         }
     },
 
@@ -169,6 +176,7 @@ export const layersActions: Pick<AppActions,
         App.state.layers.splice(idx, 0, newL);
         
         App.actions.setActiveLayer(newL.id);
+        App.recordAction("api.duplicateActiveLayer();");
     },
 
     moveLayer(dir: number) {
@@ -186,6 +194,7 @@ export const layersActions: Pick<AppActions,
         // Swap
         [App.state.layers[i], App.state.layers[ni]] = [App.state.layers[ni], App.state.layers[i]];
         
+        App.recordAction(`api.moveActiveLayer(${dir});`);
         App.emit('layers:structure');
     },
 };

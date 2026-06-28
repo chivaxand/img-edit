@@ -6,6 +6,11 @@ import { Lib } from '../../libs/index';
 Filters.register('median', {
     name: 'Median',
     mode: 'pixel',
+    menu: {
+        path: 'Filter/Denoise',
+        label: 'Median...',
+        order: 1
+    },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
         const state = {

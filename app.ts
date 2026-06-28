@@ -1,9 +1,9 @@
-import { UI } from './ui';
-import { Popup } from './ui-popup';
-import { FullScreenWorkspace } from './ui-fullscreen';
-import { Layers, Layer } from './layers';
-import { Menu } from './menu';
-import { Filters } from './filters';
+import { UI } from '~/ui';
+import { Popup } from '~/ui-popup';
+import { FullScreenWorkspace } from '~/ui-fullscreen';
+import { Layers, Layer } from '~/layers';
+import { Menu } from '~/menu';
+import { Filters } from '~/filters';
 
 declare var Lib: any;
 
@@ -20,6 +20,8 @@ export interface AppState {
     start: { x: number; y: number };
     dragOffset: { x: number; y: number };
     zoom: number;
+    recording: boolean;
+    recordedSteps: string[];
     selection: { 
         active: boolean; 
         mask: HTMLCanvasElement | null; 
@@ -85,6 +87,9 @@ export interface AppActions {
     openTransformDialog(): void;
     openFlipRotateDialog(): void;
     openLayerCanvasSizeDialog(): void;
+    openMacroRunner(): void;
+    toggleRecording(): void;
+    clearRecording(): void;
     mergeAll(): void;
     duplicateLayer(): void;
 }
@@ -99,6 +104,8 @@ export const App = {
         settings: {}, 
         isDrawing: false, start: {x:0, y:0}, dragOffset: {x:0, y:0},
         zoom: 1,
+        recording: false,
+        recordedSteps: [],
         selection: { 
             active: false, 
             mask: null, 
@@ -163,6 +170,13 @@ export const App = {
     on(event: string, fn: Function) { (this.listeners[event] = this.listeners[event] || []).push(fn); },
     emit(event: string, data?: any) { (this.listeners[event] || []).forEach(fn => fn(data)); },
 
+    recordAction(code: string) {
+        if (this.state.recording) {
+            this.state.recordedSteps.push(code);
+            this.emit('record:update');
+        }
+    },
+
     registerTool(toolDef: ToolDef) { this.tools.push(toolDef); },
     getTool() { return this.tools.find(t => t.id === this.state.tool); },
 
@@ -221,6 +235,7 @@ export const App = {
             let text = `${this.state.width} x ${this.state.height}`;
             if (l) text += ` [Layer: ${l.width} x ${l.height}]`;
             text += ` @ ${Math.round(z*100)}%`;
+            if (this.state.recording) text += ` [RECORDING...]`;
             const sb = document.getElementById('status-bar');
             if(sb) sb.textContent = text;
         };
@@ -261,6 +276,9 @@ export const App = {
             if(this.els.cvH) this.els.cvH.value = this.state.height;
             this.emit('zoom:change');
             this.render();
+        });
+        this.on('record:update', () => {
+            updateStatus();
         });
     },
 

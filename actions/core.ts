@@ -1,4 +1,4 @@
-import { App, AppActions } from '../app';
+import { App, AppActions } from '~/app';
 
 export const coreActions: Pick<AppActions, 
     'saveState' | 'undo' | 'resizeCanvas' | 'fitCanvasToLayers' | 
@@ -63,6 +63,7 @@ export const coreActions: Pick<AppActions,
         document.getElementById(`${type}-wrap`)!.style.background = val;
         const l = App.utils.getActive();
         if(l && l.type === 'text' && type === 'fg') App.actions.updateLayer(l, {color: val});
+        App.recordAction(`api.setColor('${type}', '${val}');`);
     },
 
     download() {
@@ -75,6 +76,7 @@ export const coreActions: Pick<AppActions,
         link.href = App.els.canvas.toDataURL();
         link.click();
         App.render();
+        App.recordAction("api.exportPNG();");
     },
 
     deselect() {
@@ -83,6 +85,7 @@ export const coreActions: Pick<AppActions,
         App.state.selection.ctx = null;
         App.state.selection.layerId = null;
         App.state.selection.outline = null;
+        App.recordAction("api.selectNone();");
         App.render();
     },
 

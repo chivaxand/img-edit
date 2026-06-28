@@ -1,7 +1,7 @@
-import { App } from '../app';
-import { UI } from '../ui';
-import { Layer } from '../layers';
-import { Lib } from '../libs/index';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer } from '~/layers';
+import { Lib } from '~/libs/index';
 
 interface GifFrame {
     id: number;
@@ -243,6 +243,13 @@ export const GifExport = {
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+
+                const frameSettings = this.frames.map(f => ({
+                    id: f.id,
+                    include: f.include,
+                    delay: f.delay
+                }));
+                App.recordAction(`api.exportGIF(${this.settings.loop}, ${JSON.stringify(frameSettings)});`);
             } catch (e: any) {
                 console.error(e);
                 alert("Error generating GIF: " + e.message);

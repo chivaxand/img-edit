@@ -1,6 +1,7 @@
-import { App } from './app';
-import { UI } from './ui';
-import { Layer } from './layers';
+import { App } from '~/app';
+import { UI } from '~/ui';
+import { Layer } from '~/layers';
+import { Menu } from '~/menu';
 
 export interface FilterParam {
     id: string;
@@ -17,36 +18,24 @@ export interface FilterDef {
     filter?: (values: any) => string;
     params?: FilterParam[];
     process?: (data: Uint8ClampedArray, w: number, h: number, values: any) => void;
+    apply?: (layer: Layer, values: any) => void;
     renderUI?: (root: HTMLElement, layer: Layer, hooks: any) => void;
     dialogOptions?: { width?: string; maxWidth?: string };
+    menu?: { path: string; label?: string; order?: number };
     [key: string]: any;
 }
 
 export const Filters = {
-    registry: {
-        // Native CSS Filters (Built-in)
-        grayscale: { name: 'Grayscale', mode: 'css', filter: () => 'grayscale(100%)' },
-        invert: { name: 'Invert', mode: 'css', filter: () => 'invert(100%)' },
-        sepia: { name: 'Sepia', mode: 'css', filter: () => 'sepia(100%)' },
-        brightness: { 
-            name: 'Brightness', mode: 'css',
-            params: [{id:'level', label:'Level (%)', type:'range', min:0, max:200, val:100}], 
-            filter: (v: any) => `brightness(${v.level}%)` 
-        },
-        contrast: { 
-            name: 'Contrast', mode: 'css',
-            params: [{id:'level', label:'Level (%)', type:'range', min:0, max:200, val:100}], 
-            filter: (v: any) => `contrast(${v.level}%)` 
-        },
-        hue: { 
-            name: 'Hue Rotate', mode: 'css',
-            params: [{id:'deg', label:'Degrees', type:'range', min:0, max:360, val:0}], 
-            filter: (v: any) => `hue-rotate(${v.deg}deg)` 
-        }
-    } as Record<string, FilterDef>,
+    registry: {} as Record<string, FilterDef>,
 
     register(id: string, def: FilterDef) {
         this.registry[id] = def;
+        if (def.menu) {
+            Menu.registerDynamicItem(def.menu.path, {
+                label: def.menu.label || def.name,
+                action: () => Filters.run(id)
+            }, def.menu.order);
+        }
     },
 
     run(id: string) {
@@ -64,8 +53,10 @@ export const Filters = {
         this.showDialog(def, l);
     },
 
-    applyEffect(l: Layer, def: FilterDef, values: any) {
-        if (def.mode === 'css') {
+    applyEffect(l: Layer, def: FilterDef, values: any, record = true) {
+        if (def.apply) {
+            def.apply(l, values);
+        } else if (def.mode === 'css') {
             const tmp = document.createElement('canvas');
             tmp.width = l.canvas.width; tmp.height = l.canvas.height;
             tmp.getContext('2d')!.drawImage(l.canvas, 0, 0);
@@ -83,6 +74,20 @@ export const Filters = {
         else if (def.mode === 'pixel' && def.process) {
             this.processPixels(l, (data: Uint8ClampedArray, w: number, h: number) => def.process!(data, w, h, values));
         }
+
+        if (record) {
+            // Filter out transient or non-serializable parameters before recording
+            const cleanValues: Record<string, any> = {};
+            for (const key in values) {
+                if (key.startsWith('orig') || values[key] instanceof HTMLCanvasElement || values[key] instanceof HTMLElement) {
+                    continue;
+                }
+                cleanValues[key] = values[key];
+            }
+            const filterId = Object.keys(this.registry).find(key => this.registry[key] === def) || 'unknown';
+            App.recordAction(`api.applyFilter('${filterId}', ${JSON.stringify(cleanValues)});`);
+        }
+
         App.render();
         App.ui.refreshLayers();
     },
@@ -121,9 +126,21 @@ export const Filters = {
     },
 
     showDialog(def: FilterDef, layer: Layer) {
-        const cache = document.createElement('canvas');
-        cache.width = layer.canvas.width; cache.height = layer.canvas.height;
-        cache.getContext('2d')!.drawImage(layer.canvas, 0, 0);
+        // Deep copy canvas and state properties to restore on preview/cancel
+        const origCanvas = document.createElement('canvas');
+        origCanvas.width = layer.canvas.width;
+        origCanvas.height = layer.canvas.height;
+        origCanvas.getContext('2d')!.drawImage(layer.canvas, 0, 0);
+        const cache = {
+            canvas: origCanvas,
+            width: layer.width,
+            height: layer.height,
+            x: layer.x,
+            y: layer.y,
+            canvasW: App.state.width,
+            canvasH: App.state.height
+        };
+
         const p = App.popup!;
         p.setHtml(`
             <h2>${def.name}</h2>
@@ -148,25 +165,39 @@ export const Filters = {
         let currentValues: Record<string, any> = {};
         let isPreview = true;
 
+        const restore = () => {
+            const nc = document.createElement('canvas');
+            nc.width = cache.canvas.width;
+            nc.height = cache.canvas.height;
+            nc.getContext('2d')!.drawImage(cache.canvas, 0, 0);
+            layer.canvas = nc;
+            layer.ctx = nc.getContext('2d')!;
+            layer.width = cache.width;
+            layer.height = cache.height;
+            layer.x = cache.x;
+            layer.y = cache.y;
+            
+            // Restore main canvas size to prevent cascading scaling errors on preview
+            App.actions.resizeCanvas(cache.canvasW, cache.canvasH);
+        };
+
         const hooks = {
             preview: (vals: any) => {
                 currentValues = vals;
-                // Restore original before reapplying
-                layer.ctx.clearRect(0, 0, layer.width, layer.height);
-                layer.ctx.drawImage(cache, 0, 0);
+                // Restore original state before reapplying preview
+                restore();
                 
                 if (isPreview) {
-                    this.applyEffect(layer, def, vals);
+                    this.applyEffect(layer, def, vals, false);
                 } else {
                     App.render();
                     App.ui.refreshLayers();
                 }
             },
             commit: (vals: any) => {
-                layer.ctx.clearRect(0, 0, layer.width, layer.height);
-                layer.ctx.drawImage(cache, 0, 0);
+                restore();
                 App.actions.saveState();
-                this.applyEffect(layer, def, vals);
+                this.applyEffect(layer, def, vals, true);
                 p.close();
             }
         };
@@ -199,8 +230,7 @@ export const Filters = {
 
         p.onClick('btn-ok', () => hooks.commit(currentValues));
         p.onClick('btn-cancel', () => {
-            layer.ctx.clearRect(0, 0, layer.width, layer.height);
-            layer.ctx.drawImage(cache, 0, 0);
+            restore();
             App.render();
             App.ui.refreshLayers();
             p.close();

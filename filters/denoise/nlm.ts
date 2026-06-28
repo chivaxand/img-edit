@@ -6,6 +6,11 @@ import { Lib } from '../../libs/index';
 Filters.register('nlm', {
     name: 'Non-Local Means',
     mode: 'pixel',
+    menu: {
+        path: 'Filter/Denoise',
+        label: 'Non-Local Means...',
+        order: 3
+    },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
         const state = {

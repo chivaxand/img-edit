@@ -11,7 +11,11 @@
     "moduleResolution": "node",
     // "sourceMap": true,
     // "noEmit": true,
-    "ignoreDeprecations": "6.0"
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["./*"]
+    }
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist-temp"]

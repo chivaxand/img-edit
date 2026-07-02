@@ -19,10 +19,10 @@ export const kernel = {
     },
 
     // Creates a Motion Blur Kernel (Line)
-    motion(size: number, angleDeg: number): number[][] {
+    motion(size: number, angleDeg: number, length?: number): number[][] {
         const kernel: number[][] = [];
         const center = Math.floor(size / 2);
-        const len = (size - 1) / 2;
+        const len = length !== undefined ? length / 2 : (size - 1) / 2;
         const rad = angleDeg * Math.PI / 180;
         const cos = Math.cos(rad);
         const sin = Math.sin(rad);

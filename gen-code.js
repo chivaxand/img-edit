@@ -69,28 +69,35 @@ function generateIndex(targetIndexFile, recursive = true) {
   console.log(`Updated index file: ${targetIndexFile} with ${exports.length} exports.`);
 }
 
-// Generate index for filters
+// Generate index files
 generateIndex('./filters/index.ts', true);
+generateIndex('./tools/index.ts', true);
 
 // Watch for modifications if `--watch` flag is provided
 if (process.argv.includes('--watch')) {
-  console.log('Watching for file changes in ./filters...');
-  
-  let debounceTimeout = null;
-  const watchDir = './filters';
+  const watchTargets = [
+    { dir: './filters', index: './filters/index.ts' },
+    { dir: './tools', index: './tools/index.ts' }
+  ];
 
-  fs.watch(watchDir, { recursive: true }, (eventType, filename) => {
-    if (filename && (filename.endsWith('.ts') || filename.endsWith('index.ts'))) {
-      if (debounceTimeout) {
-        clearTimeout(debounceTimeout);
-      }
-      debounceTimeout = setTimeout(() => {
-        try {
-          generateIndex('./filters/index.ts', true);
-        } catch (err) {
-          console.error('Error regenerating index:', err.message);
+  watchTargets.forEach(target => {
+    console.log(`Watching for file changes in ${target.dir}...`);
+    
+    let debounceTimeout = null;
+
+    fs.watch(target.dir, { recursive: true }, (eventType, filename) => {
+      if (filename && (filename.endsWith('.ts') || filename.endsWith('index.ts'))) {
+        if (debounceTimeout) {
+          clearTimeout(debounceTimeout);
         }
-      }, 300);
-    }
+        debounceTimeout = setTimeout(() => {
+          try {
+            generateIndex(target.index, true);
+          } catch (err) {
+            console.error(`Error regenerating index for ${target.dir}:`, err.message);
+          }
+        }, 300);
+      }
+    });
   });
 }

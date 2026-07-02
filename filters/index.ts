@@ -24,6 +24,7 @@ export * from './enhance/smart-sharpen';
 export * from './enhance/unblur';
 export * from './enhance/unsharp-mask';
 export * from './gen/blue-noise';
+export * from './gen/grid';
 export * from './gen/noise';
 export * from './gen/perlin';
 export * from './photo/vignette';

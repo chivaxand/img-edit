@@ -13,11 +13,18 @@ Filters.register('unblur', {
     },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
+        // Snapshot of the original blurred image before any previews are processed
+        const originalW = layer.canvas.width;
+        const originalH = layer.canvas.height;
+        const originalCtx = layer.canvas.getContext('2d')!;
+        const originalImgData = originalCtx.getImageData(0, 0, originalW, originalH);
+
         const state = {
             kernelType: 'disk',   // disk, gaussian, line
             kernelSize: 29,       // Diameter or Length
             sigma: 5.0,           // For Gaussian
             angle: 0,             // For Motion Blur
+            length: 10,           // For Motion Blur (Length in pixels)
             snr: 0.08             // Signal-to-Noise Ratio
         };
 
@@ -40,10 +47,11 @@ Filters.register('unblur', {
         }));
 
         // Common Size Slider (Diameter / Length)
-        container.appendChild(UI.createSliderRow({
-            label: 'Size/Len', min: 3, max: 127, step: 2, value: state.kernelSize,
+        const sizeControl = UI.createSliderRow({
+            label: 'Size', min: 3, max: 127, step: 2, value: state.kernelSize,
             onInput: v => { state.kernelSize = parseInt(v); update(); }
-        }));
+        });
+        container.appendChild(sizeControl);
 
         // Sigma Control (Gaussian only)
         const sigmaControl = UI.createSliderRow({
@@ -51,6 +59,13 @@ Filters.register('unblur', {
             onInput: v => { state.sigma = parseFloat(v); update(); }
         });
         container.appendChild(sigmaControl);
+
+        // Length Control (Motion Blur only)
+        const lengthControl = UI.createSliderRow({
+            label: 'Length (px)', min: 1, max: 100, step: 1, value: state.length,
+            onInput: v => { state.length = parseInt(v); update(); }
+        });
+        container.appendChild(lengthControl);
 
         // Angle Control (Motion Blur only)
         const angleControl = UI.createSliderRow({
@@ -67,7 +82,9 @@ Filters.register('unblur', {
 
         // Visibility Logic
         const updateControls = () => {
+            sizeControl.style.display = state.kernelType === 'line' ? 'none' : 'flex';
             sigmaControl.style.display = state.kernelType === 'gaussian' ? 'flex' : 'none';
+            lengthControl.style.display = state.kernelType === 'line' ? 'flex' : 'none';
             angleControl.style.display = state.kernelType === 'line' ? 'flex' : 'none';
         };
 
@@ -98,7 +115,7 @@ Filters.register('unblur', {
         estimateBtn.addEventListener('click', () => {
             estimateBtn.style.display = 'none';
             kernelCanvas.style.display = 'block';
-            this.onEstimateTap(layer, kernelCanvas);
+            this.onEstimateTap(layer, kernelCanvas, originalImgData);
         });
 
         // Initialize UI state
@@ -108,22 +125,28 @@ Filters.register('unblur', {
 
     nextPowerOf2(n: number) { return Math.pow(2, Math.ceil(Math.log2(n))); },
 
-    process(data: Uint8ClampedArray, w: number, h: number, { kernelType, kernelSize, sigma, angle, snr }: any) {
+    process(data: Uint8ClampedArray, w: number, h: number, { kernelType, kernelSize, sigma, angle, length, snr }: any) {
         const FFT = Lib.fft;
         const Kernel = Lib.kernel;
         
+        // Determine the actual kernel matrix size to use
+        let effKernelSize = kernelSize;
+        if (kernelType === 'line') {
+            effKernelSize = Math.max(3, (Math.ceil(length) + 2) | 1);
+        }
+
         // Determine Padding (Next Power of 2)
-        const targetW = this.nextPowerOf2(w + kernelSize * 2);
-        const targetH = this.nextPowerOf2(h + kernelSize * 2);
+        const targetW = this.nextPowerOf2(w + effKernelSize * 2);
+        const targetH = this.nextPowerOf2(h + effKernelSize * 2);
 
         // Generate Spatial Kernel (PSF)
         let kernel;
         if (kernelType === 'gaussian') {
-            kernel = Kernel.gaussian(kernelSize, sigma);
+            kernel = Kernel.gaussian(effKernelSize, sigma);
         } else if (kernelType === 'line') {
-            kernel = Kernel.motion(kernelSize, angle);
+            kernel = Kernel.motion(effKernelSize, angle, length);
         } else {
-            kernel = Kernel.disk(kernelSize);
+            kernel = Kernel.disk(effKernelSize);
         }
 
         // Prepare Kernel (Pad to target size & Shift Center)
@@ -186,7 +209,7 @@ Filters.register('unblur', {
 
     // --- OBD Implementation ---
 
-    onEstimateTap(layer: Layer, kernelCanvas: HTMLCanvasElement) {
+    onEstimateTap(layer: Layer, kernelCanvas: HTMLCanvasElement, originalImgData: ImageData) {
         const ctx = kernelCanvas.getContext('2d')!;
         ctx.fillStyle = '#111'; ctx.fillRect(0,0,256,256);
         ctx.fillStyle = '#888'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
@@ -194,10 +217,9 @@ Filters.register('unblur', {
 
         // Defer execution to let UI render
         setTimeout(() => {
-            const w = layer.canvas.width;
-            const h = layer.canvas.height;
-            const imgData = layer.ctx.getImageData(0, 0, w, h);
-            const kernel = this.estimateKernelOBD(imgData.data, w, h);
+            const w = originalImgData.width;
+            const h = originalImgData.height;
+            const kernel = this.estimateKernelOBD(originalImgData.data, w, h);
             Lib.plot.renderMatrix(kernel, kernelCanvas, { palette: 'seismic' });
         }, 10);
     },
@@ -205,67 +227,211 @@ Filters.register('unblur', {
     estimateKernelOBD(data: Uint8ClampedArray, w: number, h: number) {
         const FFT = Lib.fft;
         const kSize = 64;
-        const iterations = 30; 
-        const size = this.nextPowerOf2(Math.max(w, h, 256));
+        const iterations = 1; 
+        const size = 256;
         
-        // Extract Luminance & Pad (Constant padding for estimation)
+        // Extract and pad fixed size patch from the center
         const grayFlat = Lib.image.toGrayscale(data, w, h);
-        const gray = Lib.image.padTo2D(grayFlat, w, h, size, size, 'constant');
+        const patch = new Float32Array(size * size);
+        const cx = w >> 1, cy = h >> 1;
+        const startX = cx - (size >> 1);
+        const startY = cy - (size >> 1);
 
-        // Compute FFT of Image (X)
-        const X_fft = FFT.fft2d(gray);
-        const X_conj = { re: X_fft.re, im: X_fft.im.map((row: Float32Array) => row.map(v => -v)) };
-
-        // Compute Nom = Autocorrelation of Y (Constant)
-        const Nom_fft = FFT.multiply(X_conj, X_fft);
-        const Nom_full = FFT.ifft2d(Nom_fft.re, Nom_fft.im);
-        const Nom_shifted = FFT.shift(Nom_full).re;
-
-        // Crop Nom to kSize (Center)
-        const start = (size >> 1) - (kSize >> 1);
-        const Nom_crop = Array.from({ length: kSize }, (_, y) => 
-            Nom_shifted[y + start].slice(start, start + kSize)
-        );
-        
-        // Enforce positivity on Nom
-        for(let y=0; y<kSize; y++) for(let x=0; x<kSize; x++) Nom_crop[y][x] = Math.max(0, Nom_crop[y][x]);
-
-        // Initialize f (Uniform)
-        let f = Array.from({ length: kSize }, () => new Float32Array(kSize).fill(1/(kSize*kSize)));
-
-        // Multiplicative Update Loop
-        for(let iter=0; iter<iterations; iter++) {
-            // Pad f for FFT
-            const F_pad = FFT.prepareKernel(f, size, size);
-            const F_fft = FFT.fft2d(F_pad);
-            
-            // Y_est = X * f (Convolution)
-            const Y_est_fft = FFT.multiply(X_fft, F_fft);
-            
-            // Denom = X corr Y_est = conj(X) * Y_est
-            const Denom_fft = FFT.multiply(X_conj, Y_est_fft);
-            const Denom_full = FFT.ifft2d(Denom_fft.re, Denom_fft.im);
-            const Denom_shifted = FFT.shift(Denom_full).re;
-            
-            // Update f
-            let sum = 0;
-            for(let y=0; y<kSize; y++) {
-                for(let x=0; x<kSize; x++) {
-                    const n = Nom_crop[y][x];
-                    const d = Math.max(0, Denom_shifted[y + start][x + start]);
-                    const factor = (n + 1e-10) / (d + 1e-10);
-                    f[y][x] *= factor;
-                    sum += f[y][x];
-                }
-            }
-            
-            // Normalize f
-            if(sum > 1e-9) {
-                const invSum = 1 / sum;
-                for(let y=0; y<kSize; y++) for(let x=0; x<kSize; x++) f[y][x] *= invSum;
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const srcX = Math.max(0, Math.min(w - 1, startX + x));
+                const srcY = Math.max(0, Math.min(h - 1, startY + y));
+                patch[y * size + x] = grayFlat[srcY * w + srcX];
             }
         }
 
-        return f;
+        // Precompute Hanning window to prevent frequency cross-artifacts at boundaries
+        const window1D = new Float32Array(size);
+        for (let i = 0; i < size; i++) {
+            window1D[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (size - 1)));
+        }
+
+        const Bx = new Array(size).fill(0).map(() => new Float32Array(size));
+        const By = new Array(size).fill(0).map(() => new Float32Array(size));
+        const patchWindowed = new Array(size).fill(0).map(() => new Float32Array(size));
+
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const p = patch[y * size + x];
+                const px = x + 1 < size ? patch[y * size + x + 1] : p;
+                const py = y + 1 < size ? patch[(y + 1) * size + x] : p;
+                
+                const win = window1D[y] * window1D[x];
+                Bx[y][x] = (px - p) * win;
+                By[y][x] = (py - p) * win;
+                patchWindowed[y][x] = p * win;
+            }
+        }
+
+        const Bx_fft = FFT.fft2d(Bx);
+        const By_fft = FFT.fft2d(By);
+        const B_fft = FFT.fft2d(patchWindowed);
+
+        const k_spatial = new Array(kSize).fill(0).map(() => new Float32Array(kSize));
+
+        // Initialize kernel shape using Autocorrelation of the image gradients
+        const K_init_re = new Array(size).fill(0).map(() => new Float32Array(size));
+        const K_init_im = new Array(size).fill(0).map(() => new Float32Array(size));
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const bxr = Bx_fft.re[y][x], bxi = Bx_fft.im[y][x];
+                const byr = By_fft.re[y][x], byi = By_fft.im[y][x];
+                K_init_re[y][x] = bxr*bxr + bxi*bxi + byr*byr + byi*byi;
+            }
+        }
+        
+        const K_init_full = FFT.ifft2d(K_init_re, K_init_im).re;
+        
+        let sumInit = 0;
+        for (let y = 0; y < kSize; y++) {
+            for (let x = 0; x < kSize; x++) {
+                const srcY = (y - (kSize >> 1) + size) % size;
+                const srcX = (x - (kSize >> 1) + size) % size;
+                let val = K_init_full[srcY][srcX];
+                if (val < 0) val = 0;
+                
+                // Soft spatial taper to favor central main structure
+                const dy = y - (kSize >> 1);
+                const dx = x - (kSize >> 1);
+                const distSq = dx*dx + dy*dy;
+                const spatialWin = Math.exp(-distSq / (2 * 15 * 15));
+                
+                k_spatial[y][x] = val * spatialWin;
+                sumInit += k_spatial[y][x];
+            }
+        }
+
+        if (sumInit > 0) {
+            for (let y = 0; y < kSize; y++) {
+                for (let x = 0; x < kSize; x++) {
+                    k_spatial[y][x] /= sumInit;
+                }
+            }
+        }
+
+        let noise_var = 0.05;
+
+        // Alternating minimization loop for Blind Deconvolution
+        for (let iter = 0; iter < iterations; iter++) {
+            const K_padded = FFT.prepareKernel(k_spatial, size, size);
+            const K_fft = FFT.fft2d(K_padded);
+
+            // Step A: Wiener filter estimation of the sharp image
+            const S_fft_re = new Array(size).fill(0).map(() => new Float32Array(size));
+            const S_fft_im = new Array(size).fill(0).map(() => new Float32Array(size));
+            
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const kr = K_fft.re[y][x], ki = K_fft.im[y][x];
+                    const br = B_fft.re[y][x], bi = B_fft.im[y][x];
+                    const den = kr*kr + ki*ki + noise_var;
+                    S_fft_re[y][x] = (br * kr + bi * ki) / den;
+                    S_fft_im[y][x] = (bi * kr - br * ki) / den;
+                }
+            }
+            
+            const S = FFT.ifft2d(S_fft_re, S_fft_im).re;
+
+            // Step B: Extract gradient features
+            const Sx = new Array(size).fill(0).map(() => new Float32Array(size));
+            const Sy = new Array(size).fill(0).map(() => new Float32Array(size));
+            const mag = new Float32Array(size * size);
+            
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const p = S[y][x];
+                    const px = x + 1 < size ? S[y][x + 1] : p;
+                    const py = y + 1 < size ? S[y + 1][x] : p;
+                    const gx = px - p;
+                    const gy = py - p;
+                    const win = window1D[y] * window1D[x];
+                    Sx[y][x] = gx * win;
+                    Sy[y][x] = gy * win;
+                    mag[y * size + x] = Math.sqrt(gx*gx + gy*gy) * win;
+                }
+            }
+
+            // Step C: Strict shock thresholding to keep ONLY sharp natural edges
+            const sortedMag = new Float32Array(mag);
+            sortedMag.sort();
+            const threshold = Math.max(1e-5, sortedMag[Math.floor(size * size * 0.90)]); // Top 10%
+            
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    if (mag[y * size + x] < threshold) {
+                        Sx[y][x] = 0;
+                        Sy[y][x] = 0;
+                    }
+                }
+            }
+
+            const Sx_fft = FFT.fft2d(Sx);
+            const Sy_fft = FFT.fft2d(Sy);
+            
+            const K_est_re = new Array(size).fill(0).map(() => new Float32Array(size));
+            const K_est_im = new Array(size).fill(0).map(() => new Float32Array(size));
+            
+            let maxDen = 0;
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const sxr = Sx_fft.re[y][x], sxi = Sx_fft.im[y][x];
+                    const syr = Sy_fft.re[y][x], syi = Sy_fft.im[y][x];
+                    const den = sxr*sxr + sxi*sxi + syr*syr + syi*syi;
+                    if(den > maxDen) maxDen = den;
+                }
+            }
+            
+            const gamma = Math.max(1e-9, maxDen * 0.02); // Tikhonov Regularization (2% base)
+
+            // Step D: Solve Inverse Matrix formulation for the blur kernel
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const sxr = Sx_fft.re[y][x], sxi = Sx_fft.im[y][x];
+                    const syr = Sy_fft.re[y][x], syi = Sy_fft.im[y][x];
+                    const bxr = Bx_fft.re[y][x], bxi = Bx_fft.im[y][x];
+                    const byr = By_fft.re[y][x], byi = By_fft.im[y][x];
+
+                    const num_re = (bxr*sxr + bxi*sxi) + (byr*syr + byi*syi);
+                    const num_im = (bxi*sxr - bxr*sxi) + (byi*syr - byr*syi);
+                    const den = sxr*sxr + sxi*sxi + syr*syr + syi*syi + gamma;
+
+                    K_est_re[y][x] = num_re / den;
+                    K_est_im[y][x] = num_im / den;
+                }
+            }
+
+            const K_est_full = FFT.ifft2d(K_est_re, K_est_im).re;
+            
+            let sumK = 0;
+            for (let y = 0; y < kSize; y++) {
+                for (let x = 0; x < kSize; x++) {
+                    // Extract properly shifted kernel mapping from the FFT output
+                    const srcY = (y - (kSize >> 1) + size) % size;
+                    const srcX = (x - (kSize >> 1) + size) % size;
+                    let val = K_est_full[srcY][srcX];
+                    if (val < 0) val = 0; // Kernel must be strictly positive
+                    k_spatial[y][x] = val;
+                    sumK += val;
+                }
+            }
+            
+            if (sumK > 1e-9) {
+                for (let y = 0; y < kSize; y++) {
+                    for (let x = 0; x < kSize; x++) {
+                        k_spatial[y][x] /= sumK;
+                    }
+                }
+            }
+            
+            // Incrementally lower Wiener filter damping to force convergence in the later steps
+            noise_var = Math.max(0.005, noise_var * 0.8);
+        }
+
+        return k_spatial;
     }
 });

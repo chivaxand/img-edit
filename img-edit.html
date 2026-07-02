@@ -19,7 +19,7 @@ body { margin: 0; padding: 0; background: var(--bg-color); color: var(--text-col
 /* Layout */
 #app-header { height: 30px; background: var(--panel-color); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; padding: 0 10px; gap: 10px; }
 #app-body { flex: 1; display: flex; overflow: hidden; }
-#toolbar { width: 46px; background: var(--panel-color); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; align-items: center; padding-top: 10px; flex-shrink: 0; }
+#toolbar { width: 78px; background: var(--panel-color); border-right: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(2, 34px); gap: 4px; padding: 6px 3px; align-content: start; flex-shrink: 0; }
 #workspace { flex: 1; background: #111; position: relative; overflow: auto; display: flex; }
 #sidebar { width: 260px; background: var(--panel-color); border-left: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
 
@@ -39,12 +39,12 @@ button.btn:hover { opacity: 0.9; }
 button.btn-danger { background: #d55; }
 
 /* Toolbar Icons */
-button.icon-btn { background: transparent; border: 1px solid transparent; color: var(--text-color); width: 36px; height: 36px; cursor: pointer; border-radius: 3px; margin-bottom: 2px; font-size: 18px; display: flex; justify-content: center; align-items: center; }
+button.icon-btn { background: transparent; border: 1px solid transparent; color: var(--text-color); width: 34px; height: 34px; cursor: pointer; border-radius: 3px; font-size: 18px; display: flex; justify-content: center; align-items: center; }
 button.icon-btn:hover { background: var(--hover-color); }
 button.icon-btn.active { background: var(--accent-color); color: white; }
 
 /* Color Picker */
-.color-box { position: relative; width: 36px; height: 36px; margin-top: auto; margin-bottom: 10px; }
+.color-box { grid-column: span 2; justify-self: center; position: relative; width: 36px; height: 36px; margin-top: 15px; margin-bottom: 10px; }
 .c-swatch { width: 24px; height: 24px; border: 1px solid #fff; position: absolute; cursor: pointer; }
 input[type=color] { opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; }
 

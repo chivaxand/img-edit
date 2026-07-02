@@ -5,7 +5,7 @@ import { Layer } from '~/layers';
 // Eyedropper Tool
 App.registerTool({
     id: 'eyedropper',
-    icon: '🖌',
+    icon: '🎨',
     title: 'Eyedropper',
     onSelect(panel: HTMLElement) {
         panel.appendChild(UI.createNode('div', {style:'padding:5px; color:#888'}, 'Left-click for FG, Right-click for BG color.'));

@@ -8,7 +8,7 @@ App.registerTool({
     icon: '🎨',
     title: 'Eyedropper',
     onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createNode('div', {style:'padding:5px; color:#888'}, 'Left-click for FG, Right-click for BG color.'));
+        panel.appendChild(UI.createHint('Left-click for FG, Right-click for BG color.'));
         if (App.els.canvas) App.els.canvas.oncontextmenu = (e: Event) => e.preventDefault();
     },
     onDeselect() {
@@ -260,7 +260,7 @@ App.registerTool({
         panel.appendChild(UI.createSliderRow({ label: 'Tolerance', min: 0, max: 255, value: this.settings.tolerance, onInput: (v: string) => this.settings.tolerance = parseInt(v) }));
         panel.appendChild(UI.createCheckbox({ label: 'Contiguous', value: this.settings.contiguous, onChange: (v: boolean) => this.settings.contiguous = v }));
         panel.appendChild(UI.createCheckbox({ label: 'Smooth', value: this.settings.smoothSelect, onChange: (v: boolean) => this.settings.smoothSelect = v }));
-        panel.appendChild(UI.createNode('div', {style:'padding:5px; color:#888; font-size:11px'}, 'Click to select area.'));
+        panel.appendChild(UI.createHint('Click to select area.'));
     },
     onMouseDown(e: MouseEvent) {
         const l = App.utils.getActive();

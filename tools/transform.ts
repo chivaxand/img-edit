@@ -39,9 +39,6 @@ App.registerTool({
         l.visible = false; 
         App.render();
         
-        // UI Panel
-        panel.appendChild(UI.createNode('div', { className: 'panel-header' }, 'Transform'));
-        
         // Helper to update params from input
         const updateParam = (k: string, val: string) => {
             const v = parseFloat(val);
@@ -66,9 +63,7 @@ App.registerTool({
         ));
         panel.appendChild(inp('Rotate (°)', 'r'));
 
-        panel.appendChild(UI.createNode('div', { style: 'font-size:11px; color:#888; margin:10px 0' }, 
-            'Drag corners to Scale. Drag outer handle to Rotate.'
-        ));
+        panel.appendChild(UI.createHint('Drag corners to Scale. Drag outer handle to Rotate.', { style: 'margin: 10px 0;' }));
         
         const btnApply = UI.createNode('button', { className: 'btn', style: 'width:100%', textContent: 'Apply', on: { click: () => this.apply() } });
         panel.appendChild(btnApply);
@@ -304,5 +299,17 @@ App.registerTool({
 
     onMouseUp() {
         this.drag = null;
+    },
+
+    onDoubleClick() {
+        this.apply();
+    },
+
+    onKeyDown(e: KeyboardEvent) {
+        if (e.key === 'Enter') {
+            this.apply();
+            return true;
+        }
+        return false;
     }
 });

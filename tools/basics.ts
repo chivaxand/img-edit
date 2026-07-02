@@ -8,7 +8,7 @@ App.registerTool({
     icon: '✥',
     title: 'Move',
     onSelect: (panel: HTMLElement) => {
-        panel.appendChild(UI.createNode('div', {style:{padding:'5px', color:'#666'}}, 'Click and drag to move layer.'));
+        panel.appendChild(UI.createHint('Click and drag to move layer.'));
     },
     onMouseDown: (e: MouseEvent) => {
         const l = App.utils.getActive();
@@ -217,7 +217,7 @@ App.registerTool({
         row.appendChild(UI.createNode('button', { className:'btn', textContent:'100%', on:{click:() => App.actions.setZoom(1)} }));
         row.appendChild(UI.createNode('button', { className:'btn', textContent:'+', on:{click:() => App.actions.stepZoom(1)} }));
         panel.appendChild(row);
-        panel.appendChild(UI.createNode('div', {style:'margin-top:10px; font-size:11px; color:#888;'}, 'Right-click or Alt+Click to Zoom Out.'));
+        panel.appendChild(UI.createHint('Right-click or Alt+Click to Zoom Out.', { style: 'margin-top:10px;' }));
         if (App.els.canvas) App.els.canvas.oncontextmenu = (e: Event) => e.preventDefault();
     },
     onDeselect: () => {

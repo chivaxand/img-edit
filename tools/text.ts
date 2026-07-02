@@ -8,7 +8,7 @@ App.registerTool({
     title: 'Text',
     settings: { fontSize: 24, font: 'Arial', text: 'Text' },
     onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createNode('div', {style:{padding:'5px', color:'#888'}}, 'Click canvas to add text.'));
+        panel.appendChild(UI.createHint('Click canvas to add text.'));
         
         // Reuse UI logic from Layer definition
         const def = Layers.get('text');

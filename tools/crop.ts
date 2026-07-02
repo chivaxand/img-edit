@@ -18,8 +18,7 @@ App.registerTool({
         this.rect = { x:0, y:0, w:0, h:0 };
         this.uiEls = {}; 
         
-        panel.appendChild(UI.createNode('div', { className: 'panel-header' }, 'Crop Canvas'));
-        panel.appendChild(UI.createNode('div', { style:'font-size:11px; color:#aaa; margin-bottom:10px;' }, 'Drag to draw. Double-click to apply.'));
+        panel.appendChild(UI.createHint('Drag to draw. Double-click to apply.'));
         
         const update = (k: string, v: string) => { this.rect[k] = parseInt(v) || 0; App.render(); };
         const inp = (l: string, k: string) => {

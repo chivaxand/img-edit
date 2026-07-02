@@ -15,7 +15,6 @@ App.registerTool({
     disY: null as Float32Array | null,
 
     onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createNode('div', {style:'padding:5px; color:#aaa; font-size:11px; line-height:1.4'}, 'Drag to push and warp pixels.'));
         panel.appendChild(UI.createSliderRow({ label: 'Size', min: 10, max: 200, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));
         panel.appendChild(UI.createSliderRow({ label: 'Strength', min: 1, max: 100, value: this.settings.strength, onInput: (v: string) => this.settings.strength = parseInt(v) }));
     },

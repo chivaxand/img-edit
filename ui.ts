@@ -199,7 +199,7 @@ export const UI: UIInterface = {
         const defaultStyle: Partial<CSSStyleDeclaration> = { fontSize: '11px', color: '#aaa', marginBottom: '10px', lineHeight: '1.4' };
         const userStyle = props.style;
         const style = typeof userStyle === 'string' ? userStyle : { ...defaultStyle, ...userStyle };
-        return this.createNode('div', { className: 'popup-hint', ...props, style }, text);
+        return this.createNode('div', { className: 'popup-hint', innerHTML: text, ...props, style });
     },
     
     createSelectRow<T = any>({ label, options, value, onChange }: UISelectOpts<T>): HTMLElement {

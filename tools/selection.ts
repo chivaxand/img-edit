@@ -12,9 +12,7 @@ App.registerTool({
     mode: 'new', // new, add, sub
 
     onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createNode('div', {style:'padding:5px; color:#888'}, 
-            'Drag to select. Ctrl=Add, Alt=Subtract. Ctrl+A to Deselect.'
-        ));
+        panel.appendChild(UI.createHint('Drag to select. Ctrl=Add, Alt=Subtract. Ctrl+A to Deselect.'));
     },
 
     onMouseDown(e: MouseEvent) {

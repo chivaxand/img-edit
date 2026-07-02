@@ -18,7 +18,7 @@ App.registerTool({
     tempCanvas: null as HTMLCanvasElement | null,
 
     onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createNode('div', {style:'padding:5px; color:#aaa; font-size:11px; line-height:1.4'}, 'Alt+Click to set source.<br/>Draw to heal spot.'));
+        panel.appendChild(UI.createHint('Alt+Click to set source. Draw to heal spot.'));
         panel.appendChild(UI.createSliderRow({ label: 'Size', min: 5, max: 100, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));
         panel.appendChild(UI.createSliderRow({ label: 'Hardness', min: 0, max: 100, value: this.settings.hardness, onInput: (v: string) => this.settings.hardness = parseInt(v) }));
         panel.appendChild(UI.createSliderRow({ label: 'Spacing', min: 1, max: 200, value: this.settings.spacing, onInput: (v: string) => this.settings.spacing = parseInt(v) }));

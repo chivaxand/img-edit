@@ -9,5 +9,6 @@ export * from './liquify';
 export * from './pixel';
 export * from './selection';
 export * from './shapes';
+export * from './smudge';
 export * from './text';
 export * from './transform';

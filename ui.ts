@@ -116,6 +116,8 @@ interface UIInterface {
     createColorRow(opts: UIColorOpts): HTMLElement;
     createCanvas(opts?: UICanvasOpts): { element: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null };
     toggle(element: HTMLElement, isVisible: boolean, displayMode?: string): void;
+    createSection(title: string, ...children: any[]): HTMLElement;
+    createSubheading(text: string, color?: string): HTMLElement;
 }
 
 export const UI: UIInterface = {
@@ -287,5 +289,22 @@ export const UI: UIInterface = {
 
     toggle(element: HTMLElement, isVisible: boolean, displayMode: string = 'flex'): void {
         element.style.display = isVisible ? displayMode : 'none';
+    },
+
+    createSection(title: string, ...children: any[]): HTMLElement {
+        return this.createNode('div', { 
+            style: { display: 'flex', flexDirection: 'column', gap: '5px', border: '1px solid #444', padding: '10px', borderRadius: '4px', marginBottom: '10px' }
+        },
+            this.createNode('div', { 
+                style: { fontWeight: 'bold', fontSize: '12px', color: '#aaa', marginBottom: '5px' }
+            }, title),
+            ...children
+        );
+    },
+    
+    createSubheading(text: string, color: string = '#aaa'): HTMLElement {
+        return this.createNode('div', {
+            style: { fontWeight: 'bold', color: color, fontSize: '11px',  marginTop: '5px', marginBottom: '2px' }
+        }, text);
     }
 };

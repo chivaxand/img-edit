@@ -231,6 +231,15 @@ class Dinic {
         this.adj[v].push(b);
     }
 
+    addUndirectedEdge(u: number, v: number, cap: number) {
+        const a: DinicEdge = { to: v, cap: cap, flow: 0, rev: null };
+        const b: DinicEdge = { to: u, cap: cap, flow: 0, rev: null };
+        a.rev = b;
+        b.rev = a;
+        this.adj[u].push(a);
+        this.adj[v].push(b);
+    }
+
     bfs(s: number, t: number): boolean {
         this.level.fill(-1);
         this.level[s] = 0;
@@ -401,6 +410,7 @@ export const GrabCutFilter = {
         let currentStrokeBrush: 'fg' | 'bg' | null = null;
         let brushSize = 15;
         let solverMaxDim = 200;
+        let epochsCount = 50;
         let lambda = 10;
         let gamma = 30;
         let edgeSoftness = 4;
@@ -555,6 +565,14 @@ export const GrabCutFilter = {
             label: 'Max Dim', min: 100, max: 500, step: 25, value: solverMaxDim,
             onInput: (v) => {
                 solverMaxDim = parseInt(v);
+                if (realtimeUpdate) solve();
+            }
+        }));
+
+        ws.sidebar.appendChild(UI.createSliderRow({
+            label: 'Epochs', min: 10, max: 200, value: epochsCount,
+            onInput: (v) => {
+                epochsCount = parseInt(v);
                 if (realtimeUpdate) solve();
             }
         }));
@@ -823,8 +841,9 @@ export const GrabCutFilter = {
             }
 
             // Train Feature MLP
+            const epochs = epochsCount;
             const mlp = new MiniMLP(12, 24);
-            mlp.train(balanced_X, balanced_y, 0.03, 100, 32);
+            mlp.train(balanced_X, balanced_y, 0.03, epochs, 32);
 
             const p_fg = new Float32Array(lowW * lowH);
             for (let i = 0; i < p_fg.length; i++) {
@@ -836,8 +855,6 @@ export const GrabCutFilter = {
             const solver = new Dinic(lowW * lowH + 2);
             const S = lowW * lowH;
             const T = S + 1;
-            const SCALE = 10000;
-            const HUGE_CAP = 1000 * SCALE;
 
             // Compute Boundary Contrast Edge Beta Parameter (Using LAB Delta-E squared)
             let totalDiff = 0;
@@ -865,46 +882,90 @@ export const GrabCutFilter = {
             const sigmaSq = totalDiff / (count || 1);
             const beta = sigmaSq > 1e-6 ? 1.0 / (2.0 * sigmaSq) : 1.0;
 
-            // Construct Dinic Graph
+            // Precompute boundary contrast weights
+            const leftW = new Float64Array(lowW * lowH);
+            const upleftW = new Float64Array(lowW * lowH);
+            const upW = new Float64Array(lowW * lowH);
+            const uprightW = new Float64Array(lowW * lowH);
+
+            const gammaDivSqrt2 = gam / Math.sqrt(2.0);
+
             for (let y = 0; y < lowH; y++) {
                 for (let x = 0; x < lowW; x++) {
                     const u = y * lowW + x;
                     const idx1 = u * 3;
                     const L1 = labData[idx1], a1 = labData[idx1+1], b1 = labData[idx1+2];
-                    
-                    if (x + 1 < lowW) {
-                        const v = y * lowW + (x + 1);
-                        const idx2 = v * 3;
+
+                    if (x > 0) {
+                        const idx2 = (y * lowW + (x - 1)) * 3;
                         const L2 = labData[idx2], a2 = labData[idx2+1], b2 = labData[idx2+2];
                         const diff = (L1 - L2)**2 + (a1 - a2)**2 + (b1 - b2)**2;
-                        const cap = Math.round(gam * Math.exp(-beta * diff) * SCALE);
-                        solver.addEdge(u, v, cap);
-                        solver.addEdge(v, u, cap);
+                        leftW[u] = gam * Math.exp(-beta * diff);
+                    } else {
+                        leftW[u] = 0;
                     }
-                    
-                    if (y + 1 < lowH) {
-                        const v = (y + 1) * lowW + x;
-                        const idx2 = v * 3;
+
+                    if (x > 0 && y > 0) {
+                        const idx2 = ((y - 1) * lowW + (x - 1)) * 3;
                         const L2 = labData[idx2], a2 = labData[idx2+1], b2 = labData[idx2+2];
                         const diff = (L1 - L2)**2 + (a1 - a2)**2 + (b1 - b2)**2;
-                        const cap = Math.round(gam * Math.exp(-beta * diff) * SCALE);
-                        solver.addEdge(u, v, cap);
-                        solver.addEdge(v, u, cap);
+                        upleftW[u] = gammaDivSqrt2 * Math.exp(-beta * diff);
+                    } else {
+                        upleftW[u] = 0;
                     }
+
+                    if (y > 0) {
+                        const idx2 = ((y - 1) * lowW + x) * 3;
+                        const L2 = labData[idx2], a2 = labData[idx2+1], b2 = labData[idx2+2];
+                        const diff = (L1 - L2)**2 + (a1 - a2)**2 + (b1 - b2)**2;
+                        upW[u] = gam * Math.exp(-beta * diff);
+                    } else {
+                        upW[u] = 0;
+                    }
+
+                    if (x < lowW - 1 && y > 0) {
+                        const idx2 = ((y - 1) * lowW + (x + 1)) * 3;
+                        const L2 = labData[idx2], a2 = labData[idx2+1], b2 = labData[idx2+2];
+                        const diff = (L1 - L2)**2 + (a1 - a2)**2 + (b1 - b2)**2;
+                        uprightW[u] = gammaDivSqrt2 * Math.exp(-beta * diff);
+                    } else {
+                        uprightW[u] = 0;
+                    }
+                }
+            }
+
+            // Construct Dinic Graph with classic Unary (T) and Boundary (N) weights
+            for (let y = 0; y < lowH; y++) {
+                for (let x = 0; x < lowW; x++) {
+                    const u = y * lowW + x;
                     
-                    let capS = Math.round(lam * p_fg[u] * SCALE);
-                    let capT = Math.round(lam * (1.0 - p_fg[u]) * SCALE);
+                    let fromSource = lam * p_fg[u];
+                    let toSink = lam * (1.0 - p_fg[u]);
                     
                     if (labels[u] === 1) {
-                        capS = HUGE_CAP;
-                        capT = 0;
+                        fromSource = lam * 1000;
+                        toSink = 0;
                     } else if (labels[u] === 2) {
-                        capS = 0;
-                        capT = HUGE_CAP;
+                        fromSource = 0;
+                        toSink = lam * 1000;
                     }
                     
-                    solver.addEdge(S, u, capS);
-                    solver.addEdge(u, T, capT);
+                    solver.addEdge(S, u, fromSource);
+                    solver.addEdge(u, T, toSink);
+
+                    // Set symmetric undirected neighbor edges
+                    if (x > 0) {
+                        solver.addUndirectedEdge(u, u - 1, leftW[u]);
+                    }
+                    if (x > 0 && y > 0) {
+                        solver.addUndirectedEdge(u, u - lowW - 1, upleftW[u]);
+                    }
+                    if (y > 0) {
+                        solver.addUndirectedEdge(u, u - lowW, upW[u]);
+                    }
+                    if (x < lowW - 1 && y > 0) {
+                        solver.addUndirectedEdge(u, u - lowW + 1, uprightW[u]);
+                    }
                 }
             }
 

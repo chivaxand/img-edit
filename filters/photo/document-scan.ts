@@ -7,9 +7,9 @@ Filters.register('document-scan', {
     name: 'Document Scan / OCR',
     mode: 'pixel',
     menu: {
-        path: 'Filter/Enhance',
+        path: 'Filter/Photo',
         label: 'Document Scan...',
-        order: 4
+        order: 2
     },
 
     dialogOptions: { width: '300px' },

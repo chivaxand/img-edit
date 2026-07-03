@@ -14,11 +14,12 @@ Filters.register('blur', {
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
         const state = {
-            type: 'gaussian', // gaussian, disk, motion
+            type: 'gaussian', // gaussian, box, disk
             sigma: 5.0,
             radius: 5.0,
-            length: 20,
-            angle: 45
+            radiusX: 5.0,
+            radiusY: 5.0,
+            linkRadii: true
         };
 
         const update = () => hooks.preview(state);
@@ -28,8 +29,8 @@ Filters.register('blur', {
             label: 'Type',
             options: [
                 { value: 'gaussian', text: 'Gaussian' },
-                { value: 'disk', text: 'Disk (Defocus)' },
-                { value: 'motion', text: 'Motion Blur' }
+                { value: 'box', text: 'Box Blur (Rectangle)' },
+                { value: 'disk', text: 'Disk (Defocus)' }
             ],
             value: state.type,
             onChange: (v: string) => {
@@ -53,25 +54,77 @@ Filters.register('blur', {
         });
         container.appendChild(radiusControl);
 
-        // Motion Controls
-        const lengthControl = UI.createSliderRow({
-            label: 'Length', min: 1, max: 200, step: 1, value: state.length,
-            onInput: (v: string) => { state.length = parseInt(v); update(); }
+        // Radius X Control (Box)
+        const radiusXControl = UI.createSliderRow({
+            label: 'Radius X', min: 1, max: 100, step: 1, value: state.radiusX,
+            onInput: (v: string) => {
+                state.radiusX = parseFloat(v);
+                if (state.linkRadii) {
+                    state.radiusY = state.radiusX;
+                    const inputY = radiusYControl.querySelector('input');
+                    if (inputY) {
+                        (inputY as HTMLInputElement).value = v;
+                    }
+                    const spanY = radiusYControl.querySelector('span');
+                    if (spanY) {
+                        (spanY as HTMLSpanElement).textContent = v;
+                    }
+                }
+                update();
+            }
         });
-        container.appendChild(lengthControl);
+        container.appendChild(radiusXControl);
 
-        const angleControl = UI.createSliderRow({
-            label: 'Angle', min: 0, max: 180, step: 1, value: state.angle,
-            onInput: (v: string) => { state.angle = parseInt(v); update(); }
+        // Radius Y Control (Box)
+        const radiusYControl = UI.createSliderRow({
+            label: 'Radius Y', min: 1, max: 100, step: 1, value: state.radiusY,
+            onInput: (v: string) => {
+                state.radiusY = parseFloat(v);
+                if (state.linkRadii) {
+                    state.radiusX = state.radiusY;
+                    const inputX = radiusXControl.querySelector('input');
+                    if (inputX) {
+                        (inputX as HTMLInputElement).value = v;
+                    }
+                    const spanX = radiusXControl.querySelector('span');
+                    if (spanX) {
+                        (spanX as HTMLSpanElement).textContent = v;
+                    }
+                }
+                update();
+            }
         });
-        container.appendChild(angleControl);
+        container.appendChild(radiusYControl);
+
+        // Link Checkbox (Box)
+        const linkControl = UI.createCheckbox({
+            label: 'Link Radius X & Y',
+            value: state.linkRadii,
+            onChange: (v: boolean) => {
+                state.linkRadii = v;
+                if (v) {
+                    state.radiusY = state.radiusX;
+                    const inputY = radiusYControl.querySelector('input');
+                    if (inputY) {
+                        (inputY as HTMLInputElement).value = String(state.radiusX);
+                    }
+                    const spanY = radiusYControl.querySelector('span');
+                    if (spanY) {
+                        (spanY as HTMLSpanElement).textContent = String(state.radiusX);
+                    }
+                }
+                update();
+            }
+        });
+        container.appendChild(linkControl);
 
         const updateControls = () => {
             const t = state.type;
             sigmaControl.style.display = t === 'gaussian' ? 'flex' : 'none';
             radiusControl.style.display = t === 'disk' ? 'flex' : 'none';
-            lengthControl.style.display = t === 'motion' ? 'flex' : 'none';
-            angleControl.style.display = t === 'motion' ? 'flex' : 'none';
+            radiusXControl.style.display = t === 'box' ? 'flex' : 'none';
+            radiusYControl.style.display = t === 'box' ? 'flex' : 'none';
+            linkControl.style.display = t === 'box' ? 'flex' : 'none';
         };
 
         updateControls();
@@ -80,11 +133,37 @@ Filters.register('blur', {
 
     nextPowerOf2(n: number) { return Math.pow(2, Math.ceil(Math.log2(n))); },
 
-    process(data: Uint8ClampedArray, w: number, h: number, { type, sigma, radius, length, angle }: any) {
-        if ((type === 'gaussian' && sigma <= 0) || (type === 'disk' && radius <= 0) || (type === 'motion' && length <= 0)) return;
-
+    process(data: Uint8ClampedArray, w: number, h: number, { type, sigma, radius, radiusX, radiusY }: any) {
+        if (type === 'gaussian' && sigma <= 0) return;
+        if (type === 'disk' && radius <= 0) return;
+        
         const FFT = Lib.fft;
         const ImageUtil = Lib.image;
+
+        if (type === 'box') {
+            const rx = Math.max(0, radiusX);
+            const ry = Math.max(0, radiusY);
+            if (rx <= 0 && ry <= 0) return;
+
+            const sizeX = Math.round(rx * 2 + 1);
+            const kernelX = new Float32Array(sizeX).fill(1 / sizeX);
+
+            const sizeY = Math.round(ry * 2 + 1);
+            const kernelY = new Float32Array(sizeY).fill(1 / sizeY);
+
+            [0, 1, 2].forEach(ch => {
+                let flat = ImageUtil.extractChannel(data, w, h, ch);
+                if (rx > 0) {
+                    flat = ImageUtil.convolve1d(flat, w, h, kernelX, false, 'reflect');
+                }
+                if (ry > 0) {
+                    flat = ImageUtil.convolve1d(flat, w, h, kernelY, true, 'reflect');
+                }
+                const res2D = Array.from({ length: h }, (_, y) => flat.subarray(y * w, (y + 1) * w));
+                ImageUtil.writeChannel(data, res2D, w, h, ch);
+            });
+            return;
+        }
 
         // Calculate required Safe Padding based on blur intensity
         let safePad = 0;
@@ -92,8 +171,6 @@ Filters.register('blur', {
             safePad = Math.min(Math.ceil(sigma * 4), 64);
         } else if (type === 'disk') {
             safePad = Math.ceil(radius);
-        } else if (type === 'motion') {
-            safePad = Math.ceil(length); 
         }
 
         const targetW = this.nextPowerOf2(w + safePad * 2);
@@ -107,24 +184,8 @@ Filters.register('blur', {
         const cy = targetH / 2;
         
         const isGauss = type === 'gaussian';
-        const isMotion = type === 'motion';
         const s2 = 2 * sigma * sigma; // 2*sigma^2
         const r = radius;
-
-        // Precalc Motion Params
-        let lx: number = 0, ly: number = 0, x1: number = 0, y1: number = 0, lenSq: number = 0;
-        if (isMotion) {
-            const rad = angle * Math.PI / 180;
-            const halfLen = (length - 1) / 2;
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-            const x2 = halfLen * cos; 
-            const y2 = halfLen * sin;
-            x1 = -x2; y1 = -y2;
-            lx = x2 - x1; 
-            ly = y2 - y1;
-            lenSq = lx*lx + ly*ly;
-        }
 
         for (let y = 0; y < targetH; y++) {
             // Calculate wrapped Y distance: 0..H/2 is positive, H/2..H is negative
@@ -141,20 +202,6 @@ Filters.register('blur', {
                     const distSq = dx * dx + dy2;
                     val = Math.exp(-distSq / s2);
                     if (val < 1e-7) val = 0;
-                } else if (isMotion) {
-                    // Motion Blur (Antialiased Line)
-                    let t = 0.5;
-                    if (lenSq > 1e-9) {
-                        t = ((dx - x1) * lx + (dy - y1) * ly) / lenSq;
-                        t = t < 0 ? 0 : (t > 1 ? 1 : t);
-                    }
-                    const px = x1 + t * lx;
-                    const py = y1 + t * ly;
-                    const ddx = dx - px;
-                    const ddy = dy - py;
-                    const dist = Math.sqrt(ddx*ddx + ddy*ddy);
-                    
-                    val = Math.max(0, 1.0 - dist);
                 } else {
                     // Disk (Defocus) with simple anti-aliasing
                     const distSq = dx * dx + dy2;

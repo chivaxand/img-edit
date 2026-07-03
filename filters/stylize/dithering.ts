@@ -16,9 +16,7 @@ Filters.register('dither', {
         const state = { 
             algo: 'stucki', 
             brightness: 0, 
-            gamma: 2.2,
-            angle: 45,
-            scale: 7
+            gamma: 2.2
         };
         const update = () => hooks.preview(state);
         
@@ -33,9 +31,6 @@ Filters.register('dither', {
                 { value: 'floyd', text: 'Floyd-Steinberg' },
                 { value: 'atkinson', text: 'Atkinson' },
                 
-                // Procedural Screening (Newspaper/Magazine)
-                { value: 'halftone_screen', text: 'Newspaper (Screen)' },
-
                 // Fixed Pattern Ordered (Retro/Printer)
                 { value: 'ordered_dot', text: 'Ordered (Dot)' },
                 { value: 'ordered_line', text: 'Ordered (Line)' },
@@ -64,25 +59,10 @@ Filters.register('dither', {
             onInput: v => { state.gamma = parseFloat(v); update(); }
         }));
 
-        // Specific controls for Newspaper Screen
-        container.appendChild(UI.createSliderRow({
-            label: 'Dot Size',
-            min: 5, max: 20, step: 1,
-            value: state.scale,
-            onInput: v => { state.scale = parseInt(v); update(); }
-        }));
-
-        container.appendChild(UI.createSliderRow({
-            label: 'Angle',
-            min: 0, max: 90, step: 1,
-            value: state.angle,
-            onInput: v => { state.angle = parseInt(v); update(); }
-        }));
-
         hooks.preview(state);
     },
 
-    process(data: Uint8ClampedArray, w: number, h: number, { algo, brightness, gamma, angle, scale }: any) {
+    process(data: Uint8ClampedArray, w: number, h: number, { algo, brightness, gamma }: any) {
         // Error Diffusion Kernels: [dx, dy, weight, ...]
         const kernels: Record<string, any> = {
             stucki:      { div: 42, map: [1,0,8, 2,0,4, -2,1,2, -1,1,4, 0,1,8, 1,1,4, 2,1,2, -2,2,1, -1,2,2, 0,2,4, 1,2,2, 2,2,1] },
@@ -120,25 +100,7 @@ Filters.register('dither', {
             lum[i >> 2] = lut[data[i]] * Rw + lut[data[i+1]] * Gw + lut[data[i+2]] * Bw;
         }
 
-        if (algo === 'halftone_screen') {
-            // Procedural Halftone Screen (Newspaper style)
-            const angleRad = (angle * Math.PI) / 180;
-            const sin = Math.sin(angleRad);
-            const cos = Math.cos(angleRad);
-            const freq = (Math.PI * 2) / Math.max(1, scale);
-
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    const i = y * w + x;
-                    const rotX = x * cos - y * sin;
-                    const rotY = x * sin + y * cos;
-                    // cos(u) + cos(v) creates dots that merge into squares at 50%
-                    const osc = (Math.cos(rotX * freq) + Math.cos(rotY * freq)) / 2;
-                    const threshold = (osc + 1) * 127.5;
-                    lum[i] = lum[i] > threshold ? 255 : 0;
-                }
-            }
-        } else if (patterns[algo]) {
+        if (patterns[algo]) {
             // Fixed Ordered Dithering
             const { sz, map } = patterns[algo];
             const len = sz * sz;

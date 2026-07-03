@@ -51,6 +51,7 @@ export interface ToolDef {
     onMouseUp?: (e: MouseEvent) => void;
     onDoubleClick?: (e: MouseEvent) => void;
     onKeyDown?: (e: KeyboardEvent) => boolean;
+    onContextMenu?: (e: MouseEvent) => void;
     drawUI?: () => void;
     [key: string]: any;
 }
@@ -217,6 +218,7 @@ export const App = {
         window.addEventListener('mousemove', this.events.onMouseMove);
         window.addEventListener('mouseup', this.events.onMouseUp);
         this.els.canvas.addEventListener('dblclick', this.events.onDoubleClick);
+        this.els.canvas.addEventListener('contextmenu', this.events.onContextMenu);
         
         // Drag & Drop
         document.body.addEventListener('dragover', e => e.preventDefault());
@@ -428,7 +430,8 @@ export const App = {
                 App.state.selection.outline = null;
             }
         },
-        onDoubleClick(e: MouseEvent) { const t = App.getTool(); if (t && t.onDoubleClick) t.onDoubleClick(e); }
+        onDoubleClick(e: MouseEvent) { const t = App.getTool(); if (t && t.onDoubleClick) t.onDoubleClick(e); },
+        onContextMenu(e: MouseEvent) { const t = App.getTool(); if (t && t.onContextMenu) t.onContextMenu(e); }
     },
 
     utils: {

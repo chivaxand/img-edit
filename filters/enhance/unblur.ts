@@ -20,7 +20,7 @@ Filters.register('unblur', {
         const originalImgData = originalCtx.getImageData(0, 0, originalW, originalH);
 
         const state = {
-            kernelType: 'disk',   // disk, gaussian, line
+            kernelType: 'disk',   // disk, gaussian, square, line
             kernelSize: 29,       // Diameter or Length
             sigma: 5.0,           // For Gaussian
             angle: 0,             // For Motion Blur
@@ -36,6 +36,7 @@ Filters.register('unblur', {
             options: [
                 { value: 'disk', text: 'Disk' },
                 { value: 'gaussian', text: 'Gaussian Blur' },
+                { value: 'square', text: 'Square' },
                 { value: 'line', text: 'Motion Blur (Linear)' }
             ],
             value: state.kernelType,
@@ -145,6 +146,9 @@ Filters.register('unblur', {
             kernel = Kernel.gaussian(effKernelSize, sigma);
         } else if (kernelType === 'line') {
             kernel = Kernel.motion(effKernelSize, angle, length);
+        } else if (kernelType === 'square') {
+            const normalizedVal = 1 / (effKernelSize * effKernelSize);
+            kernel = Array.from({ length: effKernelSize }, () => new Float32Array(effKernelSize).fill(normalizedVal));
         } else {
             kernel = Kernel.disk(effKernelSize);
         }

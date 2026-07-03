@@ -9,7 +9,7 @@ Filters.register('bilateral', {
     menu: {
         path: 'Filter/Blur',
         label: 'Bilateral Blur...',
-        order: 2
+        order: 3
     },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {

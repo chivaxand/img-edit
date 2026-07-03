@@ -6,12 +6,26 @@ App.registerTool({
     id: 'select',
     icon: '⬚',
     title: 'Rectangle Select',
+    settings: { mode: 'new' },
 
     // State
     start: null as any,
     mode: 'new', // new, add, sub
 
     onSelect(panel: HTMLElement) {
+        panel.appendChild(UI.createRadioGroup({
+            label: 'Mode',
+            options: [
+                { value: 'new', label: 'New' },
+                { value: 'add', label: 'Add (+)' },
+                { value: 'sub', label: 'Subtract (-)' }
+            ],
+            value: this.settings.mode,
+            layout: 'row',
+            onChange: (v: string) => {
+                this.settings.mode = v;
+            }
+        }));
         panel.appendChild(UI.createHint('Drag to select. Ctrl=Add, Alt=Subtract. Ctrl+A to Deselect.'));
     },
 
@@ -25,7 +39,7 @@ App.registerTool({
         // Determine mode based on keys
         if (e.ctrlKey || e.metaKey) this.mode = 'add';
         else if (e.altKey) this.mode = 'sub';
-        else this.mode = 'new';
+        else this.mode = this.settings.mode || 'new';
 
         // Initialize mask if needed or if starting new selection
         if (this.mode === 'new' || App.state.selection.layerId !== l.id || !App.state.selection.mask) {

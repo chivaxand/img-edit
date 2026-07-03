@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -53,13 +54,21 @@ jobs:
           python merge.py
           mv _img-edit.html index.html
 
+      - name: Prepare Deployment Directory
+        run: |
+          mkdir -p public
+          mv index.html public/
+          # Add .nojekyll to bypass GitHub Pages Jekyll processing
+          # which can fail if source files contain Liquid tags like {{ }}
+          touch public/.nojekyll
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: 'public'
 
       - name: Deploy to GitHub Pages
         id: deployment

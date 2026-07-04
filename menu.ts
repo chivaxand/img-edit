@@ -202,7 +202,7 @@ export const Menu = {
             .menu-item.open { background: #333; color: #fff; }
             .menu-item.disabled { color: #666; pointer-events: none; }
             .menu-separator { height: 1px; background: #444; margin: 4px 0; }
-            .menu-dropdown { display: none; position: absolute; top: 100%; left: 0; background: #252526; border: 1px solid #3e3e42; min-width: 160px; z-index: 2000; box-shadow: 0 4px 6px rgba(0,0,0,0.3); padding: 4px 0; }
+            .menu-dropdown { display: none; position: absolute; top: 100%; left: 0; background: #252526; border: 1px solid #3e3e42; min-width: 190px; z-index: 2000; box-shadow: 0 4px 6px rgba(0,0,0,0.3); padding: 4px 0; }
             
             /* Root Menu Logic */
             .menu-item.open > .menu-dropdown { display: block; }

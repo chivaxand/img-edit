@@ -1,11 +1,28 @@
 import { UI } from '~/ui';
 import { Popup } from '~/ui-popup';
-import { FullScreenWorkspace } from '~/ui-fullscreen';
+import { FullScreenWorkspace, InteractiveViewport } from '~/ui-fullscreen';
 import { Layers, Layer } from '~/layers';
 import { Menu } from '~/menu';
 import { Filters } from '~/filters';
 
 declare var Lib: any;
+
+export interface AppPointerEvent {
+    clientX: number;
+    clientY: number;
+    button: number;
+    buttons: number;
+    altKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    shiftKey: boolean;
+    target: EventTarget | null;
+    preventDefault(): void;
+    stopPropagation(): void;
+    originalEvent?: MouseEvent | TouchEvent;
+}
+
+export type PointerCompatibleEvent = MouseEvent & Partial<AppPointerEvent>;
 
 export interface AppState {
     width: number;
@@ -46,12 +63,12 @@ export interface ToolDef {
     finishOnLayerSwitch?: boolean;
     onSelect?: (panel: HTMLElement) => void;
     onDeselect?: () => void;
-    onMouseDown?: (e: MouseEvent) => void;
-    onMouseMove?: (e: MouseEvent) => void;
-    onMouseUp?: (e: MouseEvent) => void;
-    onDoubleClick?: (e: MouseEvent) => void;
+    onMouseDown?: (e: PointerCompatibleEvent) => void;
+    onMouseMove?: (e: PointerCompatibleEvent) => void;
+    onMouseUp?: (e: PointerCompatibleEvent) => void;
+    onDoubleClick?: (e: PointerCompatibleEvent) => void;
     onKeyDown?: (e: KeyboardEvent) => boolean;
-    onContextMenu?: (e: MouseEvent) => void;
+    onContextMenu?: (e: PointerCompatibleEvent) => void;
     drawUI?: () => void;
     [key: string]: any;
 }
@@ -126,6 +143,7 @@ export const App = {
     listeners: {} as Record<string, Function[]>,
     popup: null as Popup | null,
     FullScreenWorkspace: FullScreenWorkspace,
+    InteractiveViewport: InteractiveViewport,
 
     keybinds: {
         bindings: {} as Record<string, Function>,
@@ -219,6 +237,12 @@ export const App = {
         window.addEventListener('mouseup', this.events.onMouseUp);
         this.els.canvas.addEventListener('dblclick', this.events.onDoubleClick);
         this.els.canvas.addEventListener('contextmenu', this.events.onContextMenu);
+
+        // Touch event bindings for touch/mobile devices
+        this.els.canvas.addEventListener('touchstart', this.events.onTouchStart.bind(this.events), { passive: false });
+        window.addEventListener('touchmove', this.events.onTouchMove.bind(this.events), { passive: false });
+        window.addEventListener('touchend', this.events.onTouchEnd.bind(this.events), { passive: false });
+        window.addEventListener('touchcancel', this.events.onTouchEnd.bind(this.events), { passive: false });
         
         // Drag & Drop
         document.body.addEventListener('dragover', e => e.preventDefault());
@@ -421,17 +445,37 @@ export const App = {
     actions: {} as AppActions,
 
     events: {
-        onMouseDown(e: MouseEvent) { const t = App.getTool(); if (t && t.onMouseDown) t.onMouseDown(e); },
-        onMouseMove(e: MouseEvent) { const t = App.getTool(); if (t && t.onMouseMove) t.onMouseMove(e); },
-        onMouseUp(e: MouseEvent) { 
+        onMouseDown(e: PointerCompatibleEvent) { const t = App.getTool(); if (t && t.onMouseDown) t.onMouseDown(e); },
+        onMouseMove(e: PointerCompatibleEvent) { const t = App.getTool(); if (t && t.onMouseMove) t.onMouseMove(e); },
+        onMouseUp(e: PointerCompatibleEvent) { 
             const t = App.getTool(); 
             if (t && t.onMouseUp) t.onMouseUp(e);
             if (App.state.selection.active) {
                 App.state.selection.outline = null;
             }
         },
-        onDoubleClick(e: MouseEvent) { const t = App.getTool(); if (t && t.onDoubleClick) t.onDoubleClick(e); },
-        onContextMenu(e: MouseEvent) { const t = App.getTool(); if (t && t.onContextMenu) t.onContextMenu(e); }
+        onDoubleClick(e: MouseEvent) { const t = App.getTool(); if (t && t.onDoubleClick) t.onDoubleClick(e as any); },
+        onContextMenu(e: MouseEvent) { const t = App.getTool(); if (t && t.onContextMenu) t.onContextMenu(e as any); },
+
+        onTouchStart(e: TouchEvent) {
+            if (e.touches.length > 0) {
+                const norm = App.utils.normalizeTouch(e, 'down');
+                App.events.onMouseDown(norm as any);
+            }
+        },
+        onTouchMove(e: TouchEvent) {
+            if (e.touches.length > 0) {
+                if (App.state.isDrawing) {
+                    e.preventDefault();
+                }
+                const norm = App.utils.normalizeTouch(e, 'move');
+                App.events.onMouseMove(norm as any);
+            }
+        },
+        onTouchEnd(e: TouchEvent) {
+            const norm = App.utils.normalizeTouch(e, 'up');
+            App.events.onMouseUp(norm as any);
+        }
     },
 
     utils: {
@@ -441,9 +485,38 @@ export const App = {
             const def = Layers.get(l.type);
             return def && def.traits && def.traits[trait];
         },
-        getPos: (e: MouseEvent) => {
+        getPos: (e: MouseEvent | TouchEvent | AppPointerEvent) => {
             const r = App.els.canvas.getBoundingClientRect();
-            return { x: (e.clientX - r.left) * (App.els.canvas.width/r.width), y: (e.clientY - r.top) * (App.els.canvas.height/r.height) };
+            let clientX = 0;
+            let clientY = 0;
+            if ('touches' in e && e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else if ('changedTouches' in e && e.changedTouches && e.changedTouches.length > 0) {
+                clientX = e.changedTouches[0].clientX;
+                clientY = e.changedTouches[0].clientY;
+            } else {
+                clientX = (e as MouseEvent | AppPointerEvent).clientX;
+                clientY = (e as MouseEvent | AppPointerEvent).clientY;
+            }
+            return { x: (clientX - r.left) * (App.els.canvas.width / r.width), y: (clientY - r.top) * (App.els.canvas.height / r.height) };
+        },
+        normalizeTouch: (e: TouchEvent, phase: 'down' | 'move' | 'up'): AppPointerEvent => {
+            const touch = (phase === 'up' ? e.changedTouches[0] : e.touches[0]) || { clientX: 0, clientY: 0 };
+            return {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                button: 0,
+                buttons: phase === 'up' ? 0 : 1,
+                altKey: e.altKey,
+                ctrlKey: e.ctrlKey,
+                metaKey: e.metaKey,
+                shiftKey: e.shiftKey,
+                preventDefault: () => e.preventDefault(),
+                stopPropagation: () => e.stopPropagation(),
+                originalEvent: e,
+                target: e.target
+            };
         },
         toLocal: (l: Layer, val: number, axis: 'x' | 'y') => (val - (axis==='x'?l.x:l.y)) * (l.canvas[axis==='x'?'width':'height'] / l[axis==='x'?'width':'height']),
         isEmpty: (c: HTMLCanvasElement) => { const b = document.createElement('canvas'); b.width=c.width; b.height=c.height; return c.toDataURL()===b.toDataURL(); },

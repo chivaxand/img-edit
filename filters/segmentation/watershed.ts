@@ -224,6 +224,8 @@ export const WatershedFilter = {
         const ws = new App.FullScreenWorkspace({
             title: 'Watershed Segmentation',
             onApply: () => {
+                leftViewport.destroy();
+                rightViewport.destroy();
                 App.actions.saveState();
                 solveFullResolution();
                 let activeData = cutoutImageData;
@@ -235,41 +237,44 @@ export const WatershedFilter = {
                     layer.ctx.putImageData(activeData, 0, 0);
                     App.emit('layer:content');
                 }
+            },
+            onCancel: () => {
+                leftViewport.destroy();
+                rightViewport.destroy();
             }
         });
 
-        // Split view container for source and segment displays
-        const panelsContainer = UI.createNode('div', { className: 'ws-panels-container' },
-            UI.createNode('div', { className: 'ws-panel' },
-                UI.createNode('div', { className: 'ws-panel-header' },
-                    UI.createNode('span', {}, 'Source & Painted Seeds'),
-                    UI.createNode('span', {}, `${fullW} x ${fullH}`)
-                ),
-                UI.createNode('div', { className: 'ws-canvas-wrapper' },
-                    UI.createNode('canvas', { id: 'ws-source-canvas', className: 'ws-canvas' })
-                )
-            ),
-            UI.createNode('div', { className: 'ws-panel' },
-                UI.createNode('div', { className: 'ws-panel-header' },
-                    UI.createNode('span', {}, 'Flooded Segment Result'),
-                    UI.createNode('span', { id: 'ws-status' }, 'Ready')
-                ),
-                UI.createNode('div', { className: 'ws-canvas-wrapper' },
-                    UI.createNode('canvas', { id: 'ws-result-canvas', className: 'ws-canvas' })
-                )
-            )
-        );
-        ws.content.appendChild(panelsContainer);
+        // Split view container using dynamic panel layout
+        const leftPanel = ws.createPanel({ title: 'Source & Painted Seeds' });
+        const rightPanel = ws.createPanel({ title: 'Flooded Segment Result', status: 'Ready' });
 
-        const srcCanvas = ws.content.querySelector('#ws-source-canvas') as HTMLCanvasElement;
-        const resCanvas = ws.content.querySelector('#ws-result-canvas') as HTMLCanvasElement;
-        const srcCtx = srcCanvas.getContext('2d')!;
-        const resCtx = resCanvas.getContext('2d')!;
+        const srcCanvas = leftPanel.canvas;
+        const resCanvas = rightPanel.canvas;
+        const statusEl = rightPanel.statusEl;
 
         srcCanvas.width = fullW;
         srcCanvas.height = fullH;
         resCanvas.width = fullW;
         resCanvas.height = fullH;
+
+        const leftViewport = new App.InteractiveViewport(srcCanvas);
+        const rightViewport = new App.InteractiveViewport(resCanvas);
+
+        leftViewport.onDraw = () => {
+            rightViewport.zoom = leftViewport.zoom;
+            rightViewport.panX = leftViewport.panX;
+            rightViewport.panY = leftViewport.panY;
+            renderSource();
+            drawActiveResult();
+        };
+
+        rightViewport.onDraw = () => {
+            leftViewport.zoom = rightViewport.zoom;
+            leftViewport.panX = rightViewport.panX;
+            leftViewport.panY = rightViewport.panY;
+            renderSource();
+            drawActiveResult();
+        };
 
         // Setup internal label state and display stroke canvases
         const maskCanvas = document.createElement('canvas');
@@ -283,12 +288,16 @@ export const WatershedFilter = {
         const visibleMaskCtx = visibleMaskCanvas.getContext('2d')!;
 
         const renderSource = () => {
-            srcCtx.clearRect(0, 0, fullW, fullH);
-            srcCtx.drawImage(layer.canvas, 0, 0);
-            srcCtx.save();
-            srcCtx.globalAlpha = 0.55;
-            srcCtx.drawImage(visibleMaskCanvas, 0, 0);
-            srcCtx.restore();
+            const ctx = leftViewport.ctx;
+            ctx.save();
+            ctx.clearRect(0, 0, fullW, fullH);
+            leftViewport.applyTransform();
+            ctx.drawImage(layer.canvas, 0, 0);
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            ctx.drawImage(visibleMaskCanvas, 0, 0);
+            ctx.restore();
+            ctx.restore();
         };
 
         const drawActiveResult = () => {
@@ -296,10 +305,18 @@ export const WatershedFilter = {
             if (viewMode === 'classes') activeData = classesImageData;
             else if (viewMode === 'mean') activeData = meanImageData;
 
-            resCtx.clearRect(0, 0, fullW, fullH);
+            const ctx = rightViewport.ctx;
+            ctx.save();
+            ctx.clearRect(0, 0, fullW, fullH);
+            rightViewport.applyTransform();
             if (activeData) {
-                resCtx.putImageData(activeData, 0, 0);
+                const tempC = document.createElement('canvas');
+                tempC.width = fullW;
+                tempC.height = fullH;
+                tempC.getContext('2d')!.putImageData(activeData, 0, 0);
+                ctx.drawImage(tempC, 0, 0);
             }
+            ctx.restore();
         };
 
         // Sidebar Painting tool buttons
@@ -349,7 +366,7 @@ export const WatershedFilter = {
             onClick: () => clearStrokes()
         });
 
-        const btnRow = UI.createNode('div', { style: 'display:flex; gap:10px; margin-bottom:15px;' }, undoBtn, clearBtn);
+        const btnRow = UI.createNode('div', { style: 'display:flex; gap:10px;' }, undoBtn, clearBtn);
         ws.sidebar.appendChild(btnRow);
 
         // Dynamic Seeds visualizer container
@@ -369,7 +386,13 @@ export const WatershedFilter = {
             });
         };
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:15px;' }, 'Visual Settings'));
+        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Viewport Controls'));
+        const zoomInBtn = UI.createButton({ label: 'Zoom +', className: 'btn', onClick: () => { leftViewport.zoom = Math.min(25, leftViewport.zoom * 1.25); leftViewport.onDraw!(); } });
+        const zoomOutBtn = UI.createButton({ label: 'Zoom -', className: 'btn', onClick: () => { leftViewport.zoom = Math.max(0.2, leftViewport.zoom / 1.25); leftViewport.onDraw!(); } });
+        const resetZoomBtn = UI.createButton({ label: 'Reset Zoom', className: 'btn cancel-btn', onClick: () => { leftViewport.reset(); } });
+        ws.sidebar.appendChild(UI.createNode('div', { style: 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;' }, zoomInBtn, zoomOutBtn, resetZoomBtn));
+
+        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Visual Settings'));
 
         ws.sidebar.appendChild(UI.createSelectRow({
             label: 'Result Type',
@@ -428,7 +451,7 @@ export const WatershedFilter = {
             }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:15px;' }, 'Solver Options'));
+        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Solver Options'));
 
         ws.sidebar.appendChild(UI.createSliderRow({
             label: 'Preview Size', min: 200, max: 1000, step: 25, value: solverMaxDim,
@@ -454,17 +477,7 @@ export const WatershedFilter = {
         });
         ws.sidebar.appendChild(solveBtn);
 
-        // Map mouse click coordinates to local space
-        const getCoords = (e: MouseEvent | Touch, cvs: HTMLCanvasElement) => {
-            const rect = cvs.getBoundingClientRect();
-            const scaleX = cvs.width / rect.width;
-            const scaleY = cvs.height / rect.height;
-            return {
-                x: (e.clientX - rect.left) * scaleX,
-                y: (e.clientY - rect.top) * scaleY
-            };
-        };
-
+        // --- Stroke Execution and Interaction Logic ---
         const executeStroke = (coords: { x: number, y: number }, activeBrush: 'obj' | 'bg' | 'erase') => {
             maskCtx.lineWidth = brushSize;
             maskCtx.lineCap = 'round';
@@ -507,75 +520,29 @@ export const WatershedFilter = {
             renderSource();
         };
 
-        srcCanvas.onmousedown = (e) => {
-            e.preventDefault();
+        leftViewport.onMouseDown = (e) => {
             saveHistoryState();
-            isDrawing = true;
+            currentStrokeBrush = e.isRightClick ? 'bg' : brushType;
             
-            // Lock the brush type based on the initial click state
-            currentStrokeBrush = (e.buttons === 2) ? 'bg' : brushType;
-            
-            const coords = getCoords(e, srcCanvas);
             maskCtx.beginPath();
-            maskCtx.moveTo(coords.x, coords.y);
+            maskCtx.moveTo(e.x, e.y);
             visibleMaskCtx.beginPath();
-            visibleMaskCtx.moveTo(coords.x, coords.y);
+            visibleMaskCtx.moveTo(e.x, e.y);
 
-            executeStroke(coords, currentStrokeBrush);
+            executeStroke({ x: e.x, y: e.y }, currentStrokeBrush);
         };
 
-        srcCanvas.onmousemove = (e) => {
-            if (!isDrawing || !currentStrokeBrush) return;
-            const coords = getCoords(e, srcCanvas);
-            executeStroke(coords, currentStrokeBrush);
+        leftViewport.onMouseMove = (e) => {
+            if (!currentStrokeBrush) return;
+            executeStroke({ x: e.x, y: e.y }, currentStrokeBrush);
         };
 
-        window.addEventListener('mouseup', () => {
-            if (isDrawing) {
-                isDrawing = false;
-                currentStrokeBrush = null; // Release brush lock
-                maskCtx.beginPath();
-                visibleMaskCtx.beginPath();
-                if (realtimeUpdate) solve();
-            }
-        });
-
-        srcCanvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            saveHistoryState();
-            isDrawing = true;
-            currentStrokeBrush = brushType; // Lock brush for touch
-            if (e.touches && e.touches.length > 0) {
-                const coords = getCoords(e.touches[0], srcCanvas);
-                maskCtx.beginPath();
-                maskCtx.moveTo(coords.x, coords.y);
-                visibleMaskCtx.beginPath();
-                visibleMaskCtx.moveTo(coords.x, coords.y);
-                executeStroke(coords, currentStrokeBrush);
-            }
-        }, { passive: false });
-
-        srcCanvas.addEventListener('touchmove', (e) => {
-            if (!isDrawing || !currentStrokeBrush) return;
-            e.preventDefault();
-            if (e.touches && e.touches.length > 0) {
-                const coords = getCoords(e.touches[0], srcCanvas);
-                executeStroke(coords, currentStrokeBrush);
-            }
-        }, { passive: false });
-
-        srcCanvas.addEventListener('touchend', () => {
-            if (isDrawing) {
-                isDrawing = false;
-                currentStrokeBrush = null;
-                maskCtx.beginPath();
-                visibleMaskCtx.beginPath();
-                if (realtimeUpdate) solve();
-            }
-        });
-
-        // Prevent right-click browser menu
-        srcCanvas.oncontextmenu = (e) => e.preventDefault();
+        leftViewport.onMouseUp = () => {
+            currentStrokeBrush = null;
+            maskCtx.beginPath();
+            visibleMaskCtx.beginPath();
+            if (realtimeUpdate) solve();
+        };
 
         const saveHistoryState = () => {
             const labelData = maskCtx.getImageData(0, 0, fullW, fullH);
@@ -794,9 +761,9 @@ export const WatershedFilter = {
 
         // Render result views using segment classification maps
         const renderResult = (fullLabels: Int32Array) => {
-            const cutoutData = resCtx.createImageData(fullW, fullH);
-            const classesData = resCtx.createImageData(fullW, fullH);
-            const meanData = resCtx.createImageData(fullW, fullH);
+            const cutoutData = rightViewport.ctx.createImageData(fullW, fullH);
+            const classesData = rightViewport.ctx.createImageData(fullW, fullH);
+            const meanData = rightViewport.ctx.createImageData(fullW, fullH);
 
             const seedRgbMap: Record<number, { r: number; g: number; b: number }> = {};
             seeds.forEach(seed => {
@@ -879,7 +846,6 @@ export const WatershedFilter = {
 
         // Real-time solver optimized with nearest-neighbor upscaling
         const solve = () => {
-            const statusEl = ws.overlay.querySelector('#ws-status')!;
             statusEl.textContent = 'Flooding...';
 
             let lowW = fullW;
@@ -994,12 +960,7 @@ export const WatershedFilter = {
         const style = document.createElement('style');
         style.id = 'watershed-filter-style';
         style.textContent = `
-            .ws-panels-container { display: flex; width: 100%; height: 100%; gap: 15px; padding: 15px; box-sizing: border-box; background: #141414; }
-            .ws-panel { flex: 1; display: flex; flex-direction: column; background: #1e1e1e; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
-            .ws-panel-header { display: flex; justify-content: space-between; align-items: center; background: #252526; padding: 8px 12px; border-bottom: 1px solid #333; font-weight: bold; font-size: 11px; color: #aaa; text-transform: uppercase; }
-            .ws-canvas-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 10px; background-image: linear-gradient(45deg, #181818 25%, transparent 25%), linear-gradient(-45deg, #181818 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181818 75%), linear-gradient(-45deg, transparent 75%, #181818 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px; }
-            .ws-canvas { max-width: 100%; max-height: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.5); object-fit: contain; image-rendering: pixelated; background: transparent; cursor: crosshair; }
-            .ws-seeds-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; min-height: 120px; max-height: 220px; overflow-y: auto; padding: 6px; border: 1px solid #2d2d2d; border-radius: 4px; background: #121212; flex-shrink: 0; }
+            .ws-seeds-container { display: flex; flex-direction: column; gap: 8px; min-height: 100px; max-height: 130px; overflow-y: auto; padding: 6px; border: 1px solid #2d2d2d; border-radius: 4px; background: #121212; flex-shrink: 0; }
             .ws-seed-row { display: flex; align-items: center; padding: 8px 10px; background: #1e1e1e; border: 1px solid #333; border-radius: 6px; transition: all 0.2s ease; }
             .ws-seed-color { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.2); }
             .ws-seed-info { flex-grow: 1; font-weight: bold; font-size: 12px; color: #ccc; }

@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ImgEdit</title>
+<meta name="viewport" content="width=1024, initial-scale=1.0, user-scalable=yes">
 <style>
 :root {
     --bg-color: #1e1e1e;
@@ -14,7 +13,7 @@
     --hover-color: #2d2d30;
     --font-family: 'Segoe UI', Tahoma, sans-serif;
 }
-body { margin: 0; padding: 0; background: var(--bg-color); color: var(--text-color); font-family: var(--font-family); font-size: 13px; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+body { margin: 0; padding: 0; background: var(--bg-color); color: var(--text-color); font-family: var(--font-family); font-size: 13px; overflow: auto; min-width: 1024px; min-height: 600px; height: 100vh; display: flex; flex-direction: column; }
 
 /* Layout */
 #app-header { height: 30px; background: var(--panel-color); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; padding: 0 10px; gap: 10px; }
@@ -59,7 +58,7 @@ input[type=color] { opacity: 0; width: 100%; height: 100%; cursor: pointer; padd
 
 /* Canvas */
 #canvas-container { margin: auto; flex-shrink: 0; box-shadow: 0 0 20px rgba(0,0,0,0.5); background-image: linear-gradient(45deg, #2a2a2a 25%, transparent 25%), linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2a2a 75%), linear-gradient(-45deg, transparent 75%, #2a2a2a 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; }
-canvas { display: block; cursor: crosshair; }
+canvas { display: block; cursor: crosshair; touch-action: none; }
 </style>
 </head>
 <body>

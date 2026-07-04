@@ -429,47 +429,52 @@ export const GrabCutFilter = {
         const ws = new App.FullScreenWorkspace({
             title: 'Hybrid GrabCut Segmentation',
             onApply: () => {
+                leftViewport.destroy();
+                rightViewport.destroy();
                 if (cutoutImageData) {
                     App.actions.saveState();
                     layer.ctx.clearRect(0, 0, fullW, fullH);
                     layer.ctx.putImageData(cutoutImageData, 0, 0);
                     App.emit('layer:content');
                 }
+            },
+            onCancel: () => {
+                leftViewport.destroy();
+                rightViewport.destroy();
             }
         });
 
-        // 1. Build Side Panels inside content area
-        const panelsContainer = UI.createNode('div', { className: 'gc-panels-container' },
-            UI.createNode('div', { className: 'gc-panel' },
-                UI.createNode('div', { className: 'gc-panel-header' },
-                    UI.createNode('span', {}, 'Source Image & User Strokes'),
-                    UI.createNode('span', {}, `${fullW} x ${fullH}`)
-                ),
-                UI.createNode('div', { className: 'gc-canvas-wrapper' },
-                    UI.createNode('canvas', { id: 'gc-source-canvas', className: 'gc-canvas' })
-                )
-            ),
-            UI.createNode('div', { className: 'gc-panel' },
-                UI.createNode('div', { className: 'gc-panel-header' },
-                    UI.createNode('span', {}, 'Interactive Segment Result'),
-                    UI.createNode('span', { id: 'gc-status' }, 'Ready')
-                ),
-                UI.createNode('div', { className: 'gc-canvas-wrapper' },
-                    UI.createNode('canvas', { id: 'gc-result-canvas', className: 'gc-canvas' })
-                )
-            )
-        );
-        ws.content.appendChild(panelsContainer);
+        // 1. Build Side Panels inside content area using dynamic panel layout
+        const leftPanel = ws.createPanel({ title: 'Source Image & User Strokes' });
+        const rightPanel = ws.createPanel({ title: 'Interactive Segment Result', status: 'Ready' });
 
-        const srcCanvas = ws.content.querySelector('#gc-source-canvas') as HTMLCanvasElement;
-        const resCanvas = ws.content.querySelector('#gc-result-canvas') as HTMLCanvasElement;
-        const srcCtx = srcCanvas.getContext('2d')!;
-        const resCtx = resCanvas.getContext('2d')!;
+        const srcCanvas = leftPanel.canvas;
+        const resCanvas = rightPanel.canvas;
+        const statusEl = rightPanel.statusEl;
 
         srcCanvas.width = fullW;
         srcCanvas.height = fullH;
         resCanvas.width = fullW;
         resCanvas.height = fullH;
+
+        const leftViewport = new App.InteractiveViewport(srcCanvas);
+        const rightViewport = new App.InteractiveViewport(resCanvas);
+
+        leftViewport.onDraw = () => {
+            rightViewport.zoom = leftViewport.zoom;
+            rightViewport.panX = leftViewport.panX;
+            rightViewport.panY = leftViewport.panY;
+            renderSource();
+            renderResult();
+        };
+
+        rightViewport.onDraw = () => {
+            leftViewport.zoom = rightViewport.zoom;
+            leftViewport.panX = rightViewport.panX;
+            leftViewport.panY = rightViewport.panY;
+            renderSource();
+            renderResult();
+        };
 
         // Prepare Offscreen Drawing Canvas
         const maskCanvas = document.createElement('canvas');
@@ -478,12 +483,14 @@ export const GrabCutFilter = {
         const maskCtx = maskCanvas.getContext('2d')!;
 
         const renderSource = () => {
-            srcCtx.clearRect(0, 0, fullW, fullH);
-            srcCtx.drawImage(layer.canvas, 0, 0);
-            srcCtx.save();
-            srcCtx.globalAlpha = 0.5;
-            srcCtx.drawImage(maskCanvas, 0, 0);
-            srcCtx.restore();
+            const ctx = leftViewport.ctx;
+            ctx.save();
+            ctx.clearRect(0, 0, fullW, fullH);
+            leftViewport.applyTransform();
+            ctx.drawImage(layer.canvas, 0, 0);
+            ctx.globalAlpha = 0.5;
+            ctx.drawImage(maskCanvas, 0, 0);
+            ctx.restore();
         };
 
         const renderResult = () => {
@@ -491,10 +498,18 @@ export const GrabCutFilter = {
             if (viewMode === 'mlp') activeData = mlpImageData;
             else if (viewMode === 'lowres') activeData = lowresImageData;
 
-            resCtx.clearRect(0, 0, fullW, fullH);
+            const ctx = rightViewport.ctx;
+            ctx.save();
+            ctx.clearRect(0, 0, fullW, fullH);
+            rightViewport.applyTransform();
             if (activeData) {
-                resCtx.putImageData(activeData, 0, 0);
+                const tempC = document.createElement('canvas');
+                tempC.width = fullW;
+                tempC.height = fullH;
+                tempC.getContext('2d')!.putImageData(activeData, 0, 0);
+                ctx.drawImage(tempC, 0, 0);
             }
+            ctx.restore();
         };
 
         // 2. Build Sidebar Controls
@@ -544,6 +559,12 @@ export const GrabCutFilter = {
 
         const btnRow = UI.createNode('div', { style: 'display:flex; gap:10px;' }, undoBtn, clearBtn);
         ws.sidebar.appendChild(btnRow);
+
+        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:15px;' }, 'Viewport Controls'));
+        const zoomInBtn = UI.createButton({ label: 'Zoom +', className: 'btn', onClick: () => { leftViewport.zoom = Math.min(25, leftViewport.zoom * 1.25); leftViewport.onDraw!(); } });
+        const zoomOutBtn = UI.createButton({ label: 'Zoom -', className: 'btn', onClick: () => { leftViewport.zoom = Math.max(0.2, leftViewport.zoom / 1.25); leftViewport.onDraw!(); } });
+        const resetZoomBtn = UI.createButton({ label: 'Reset Zoom', className: 'btn cancel-btn', onClick: () => { leftViewport.reset(); } });
+        ws.sidebar.appendChild(UI.createNode('div', { style: 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;' }, zoomInBtn, zoomOutBtn, resetZoomBtn));
 
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:15px;' }, 'Solver Settings'));
 
@@ -626,16 +647,6 @@ export const GrabCutFilter = {
         ws.sidebar.appendChild(solveBtn);
 
         // --- Interaction Logic ---
-        const getCoords = (e: MouseEvent | Touch, cvs: HTMLCanvasElement) => {
-            const rect = cvs.getBoundingClientRect();
-            const scaleX = cvs.width / rect.width;
-            const scaleY = cvs.height / rect.height;
-            return {
-                x: (e.clientX - rect.left) * scaleX,
-                y: (e.clientY - rect.top) * scaleY
-            };
-        };
-
         const executeStroke = (coords: { x: number, y: number }, activeBrush: 'fg' | 'bg') => {
             maskCtx.strokeStyle = activeBrush === 'fg' ? '#4caf50' : '#2196f3';
             maskCtx.lineWidth = brushSize;
@@ -648,66 +659,24 @@ export const GrabCutFilter = {
             renderSource();
         };
 
-        srcCanvas.onmousedown = (e) => {
-            e.preventDefault();
+        leftViewport.onMouseDown = (e) => {
             saveHistoryState();
-            isDrawing = true;
-            currentStrokeBrush = (e.buttons === 2) ? 'bg' : brushType;
-            
-            const coords = getCoords(e, srcCanvas);
+            currentStrokeBrush = e.isRightClick ? 'bg' : brushType;
             maskCtx.beginPath();
-            maskCtx.moveTo(coords.x, coords.y);
-            executeStroke(coords, currentStrokeBrush);
+            maskCtx.moveTo(e.x, e.y);
+            executeStroke({ x: e.x, y: e.y }, currentStrokeBrush);
         };
 
-        srcCanvas.onmousemove = (e) => {
-            if (!isDrawing || !currentStrokeBrush) return;
-            const coords = getCoords(e, srcCanvas);
-            executeStroke(coords, currentStrokeBrush);
+        leftViewport.onMouseMove = (e) => {
+            if (!currentStrokeBrush) return;
+            executeStroke({ x: e.x, y: e.y }, currentStrokeBrush);
         };
-        
-        window.addEventListener('mouseup', () => {
-            if (isDrawing) {
-                isDrawing = false;
-                currentStrokeBrush = null; // Release brush lock
-                maskCtx.beginPath();
-                if (realtimeUpdate) solve();
-            }
-        });
 
-        srcCanvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            saveHistoryState();
-            isDrawing = true;
-            currentStrokeBrush = brushType; // Lock brush for touch
-            if (e.touches && e.touches.length > 0) {
-                const coords = getCoords(e.touches[0], srcCanvas);
-                maskCtx.beginPath();
-                maskCtx.moveTo(coords.x, coords.y);
-                executeStroke(coords, currentStrokeBrush);
-            }
-        }, { passive: false });
-
-        srcCanvas.addEventListener('touchmove', (e) => {
-            if (!isDrawing || !currentStrokeBrush) return;
-            e.preventDefault();
-            if (e.touches && e.touches.length > 0) {
-                const coords = getCoords(e.touches[0], srcCanvas);
-                executeStroke(coords, currentStrokeBrush);
-            }
-        }, { passive: false });
-
-        srcCanvas.addEventListener('touchend', (e) => {
-            if (isDrawing) {
-                isDrawing = false;
-                currentStrokeBrush = null; // Release brush lock
-                maskCtx.beginPath();
-                if (realtimeUpdate) solve();
-            }
-        });
-
-        // Prevent right-click browser menu
-        srcCanvas.oncontextmenu = (e) => e.preventDefault();
+        leftViewport.onMouseUp = () => {
+            currentStrokeBrush = null;
+            maskCtx.beginPath();
+            if (realtimeUpdate) solve();
+        };
 
         // --- History / Drawing helpers ---
         const saveHistoryState = () => {
@@ -736,7 +705,6 @@ export const GrabCutFilter = {
 
         // --- Core Solver Mechanics ---
         const solve = () => {
-            const statusEl = ws.overlay.querySelector('#gc-status')!;
             statusEl.textContent = 'Solving...';
 
             let lowW = fullW;
@@ -1017,9 +985,9 @@ export const GrabCutFilter = {
                 }
             }
 
-            cutoutImageData = resCtx.createImageData(fullW, fullH);
-            mlpImageData = resCtx.createImageData(fullW, fullH);
-            lowresImageData = resCtx.createImageData(fullW, fullH);
+            const cutoutData = rightViewport.ctx.createImageData(fullW, fullH);
+            const mlpData = rightViewport.ctx.createImageData(fullW, fullH);
+            const lowresData = rightViewport.ctx.createImageData(fullW, fullH);
 
             // 1. Build MLP Probability Map
             for (let y = 0; y < fullH; y++) {
@@ -1030,10 +998,10 @@ export const GrabCutFilter = {
                     const p = p_fg[lowY * lowW + lowX];
                     const idx = i * 4;
                     const val = Math.round(p * 255);
-                    mlpImageData.data[idx] = val;
-                    mlpImageData.data[idx+1] = val;
-                    mlpImageData.data[idx+2] = val;
-                    mlpImageData.data[idx+3] = 255;
+                    mlpData.data[idx] = val;
+                    mlpData.data[idx+1] = val;
+                    mlpData.data[idx+2] = val;
+                    mlpData.data[idx+3] = 255;
                 }
             }
 
@@ -1041,24 +1009,28 @@ export const GrabCutFilter = {
             for (let i = 0; i < upscaledMask.length; i++) {
                 const idx = i * 4;
                 const val = upscaledMask[i] >= 0.5 ? 255 : 0;
-                lowresImageData.data[idx] = val;
-                lowresImageData.data[idx+1] = val;
-                lowresImageData.data[idx+2] = val;
-                lowresImageData.data[idx+3] = 255;
+                lowresData.data[idx] = val;
+                lowresData.data[idx+1] = val;
+                lowresData.data[idx+2] = val;
+                lowresData.data[idx+3] = 255;
             }
 
             // 3. Build Transparent Cutout
             for (let i = 0; i < finalBinaryMask.length; i++) {
                 const idx = i * 4;
                 if (finalBinaryMask[i] === 1) {
-                    cutoutImageData.data[idx] = fullImgData[idx];
-                    cutoutImageData.data[idx+1] = fullImgData[idx+1];
-                    cutoutImageData.data[idx+2] = fullImgData[idx+2];
-                    cutoutImageData.data[idx+3] = 255;
+                    cutoutData.data[idx] = fullImgData[idx];
+                    cutoutData.data[idx+1] = fullImgData[idx+1];
+                    cutoutData.data[idx+2] = fullImgData[idx+2];
+                    cutoutData.data[idx+3] = 255;
                 } else {
-                    cutoutImageData.data[idx+3] = 0;
+                    cutoutData.data[idx+3] = 0;
                 }
             }
+
+            cutoutImageData = cutoutData;
+            mlpImageData = mlpData;
+            lowresImageData = lowresData;
 
             renderResult();
             statusEl.textContent = 'Optimized';
@@ -1075,11 +1047,6 @@ export const GrabCutFilter = {
         const style = document.createElement('style');
         style.id = 'grabcut-filter-style';
         style.textContent = `
-            .gc-panels-container { display: flex; width: 100%; height: 100%; gap: 15px; padding: 15px; box-sizing: border-box; background: #141414; }
-            .gc-panel { flex: 1; display: flex; flex-direction: column; background: #1e1e1e; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
-            .gc-panel-header { display: flex; justify-content: space-between; align-items: center; background: #252526; padding: 8px 12px; border-bottom: 1px solid #333; font-weight: bold; font-size: 11px; color: #aaa; text-transform: uppercase; }
-            .gc-canvas-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 10px; background-image: linear-gradient(45deg, #181818 25%, transparent 25%), linear-gradient(-45deg, #181818 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181818 75%), linear-gradient(-45deg, transparent 75%, #181818 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px; }
-            .gc-canvas { max-width: 100%; max-height: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.5); object-fit: contain; image-rendering: pixelated; background: transparent; cursor: crosshair; }
             .gc-tool-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
             .gc-tool-btn { background-color: #121212; border: 1px solid #333; color: #ccc; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s ease; font-weight: bold; }
             .gc-tool-btn:hover { background-color: #2a2a2a; border-color: #007acc; }

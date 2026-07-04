@@ -46,14 +46,20 @@ export const PeriodicNoiseWorkspace = {
 
         this.injectStyles();
 
-        // Constants and Workspace parameters
-        const PREVIEW_SIZE = 512;
+        // Workspace parameters
         let activeTool: 'pen' | 'erase' | 'auto' | 'grid' = 'pen';
         let brushSize = 1;
         let spectrumGain = 1.0;
         let colormapType = 'grayscale';
         let windowType = 'none';
         let livePreview = true;
+        let isResultActual = false;
+        let hasDrawnSinceMouseDown = false;
+        let cachedProposedSpikes: Array<{ x: number; y: number; val: number }> | null = null;
+
+        const invalidateSpikesCache = () => {
+            cachedProposedSpikes = null;
+        };
 
         // Auto Detection & Harmonic Grid parameters
         let spikeThreshold = 70;
@@ -77,27 +83,23 @@ export const PeriodicNoiseWorkspace = {
         let hoverY: number | null = null;
 
         // Notch filter masks and edit history
-        const mask = new Uint8Array(PREVIEW_SIZE * PREVIEW_SIZE);
+        const mask = new Uint8Array(fullW * fullH);
         let historyStack: Uint8Array[] = [new Uint8Array(mask)];
         let historyIndex = 0;
 
-        // Fast preview downsampled spatial data structures
-        const previewSrcCanvas = document.createElement('canvas');
-        previewSrcCanvas.width = PREVIEW_SIZE;
-        previewSrcCanvas.height = PREVIEW_SIZE;
-        const previewSrcCtx = previewSrcCanvas.getContext('2d')!;
-        previewSrcCtx.drawImage(layer.canvas, 0, 0, PREVIEW_SIZE, PREVIEW_SIZE);
-        const previewSrcImgData = previewSrcCtx.getImageData(0, 0, PREVIEW_SIZE, PREVIEW_SIZE).data;
+        // Full resolution image spatial representation structures
+        const fullImgData = layer.ctx.getImageData(0, 0, fullW, fullH);
+        const srcData = fullImgData.data;
 
-        const previewDenoisedData = new Uint8ClampedArray(PREVIEW_SIZE * PREVIEW_SIZE * 4);
+        const previewDenoisedData = new Uint8ClampedArray(fullW * fullH * 4);
 
         // Precompute grayscale preview representation for spectrum viewer
-        const grayData = new Float32Array(PREVIEW_SIZE * PREVIEW_SIZE);
-        for (let i = 0; i < PREVIEW_SIZE * PREVIEW_SIZE; i++) {
+        const grayData = new Float32Array(fullW * fullH);
+        for (let i = 0; i < fullW * fullH; i++) {
             const idx = i * 4;
-            const r = previewSrcImgData[idx];
-            const g = previewSrcImgData[idx + 1];
-            const b = previewSrcImgData[idx + 2];
+            const r = srcData[idx];
+            const g = srcData[idx + 1];
+            const b = srcData[idx + 2];
             grayData[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
         }
 
@@ -105,18 +107,22 @@ export const PeriodicNoiseWorkspace = {
         const ws = new App.FullScreenWorkspace({
             title: 'Periodic Noise FFT Workspace',
             onApply: () => {
-                const statusEl = ws.overlay.querySelector('#pn-status')!;
-                statusEl.textContent = 'Applying to Full-Size Image...';
+                leftViewport.destroy();
+                rightViewport.destroy();
 
-                setTimeout(() => {
-                    const fullImgData = layer.ctx.getImageData(0, 0, fullW, fullH);
-                    const data = fullImgData.data;
+                const finalImgData = layer.ctx.getImageData(0, 0, fullW, fullH);
+                const data = finalImgData.data;
 
+                if (isResultActual) {
+                    for (let i = 0; i < fullW * fullH * 4; i++) {
+                        data[i] = previewDenoisedData[i];
+                    }
+                } else {
                     // Apply notch mask to color channels independently (without windowing)
                     for (let ch = 0; ch < 3; ch++) {
                         const channelData = new Float32Array(fullW * fullH);
                         for (let i = 0; i < fullW * fullH; i++) {
-                            channelData[i] = data[i * 4 + ch];
+                            channelData[i] = srcData[i * 4 + ch];
                         }
 
                         const real2D: Float32Array[] = [];
@@ -127,26 +133,15 @@ export const PeriodicNoiseWorkspace = {
                         const fftRes = Lib.fft.fft2d(real2D);
                         const shifted = Lib.fft.shift(fftRes);
 
-                        // Nullify periodic noise peaks using scaled coordinates
+                        // Nullify periodic noise peaks using exact coordinates
                         for (let y = 0; y < fullH; y++) {
                             const rowRe = shifted.re[y];
                             const rowIm = shifted.im[y];
-
-                            const fy = (y - fullH / 2) / fullH;
-                            const py = Math.round(fy * PREVIEW_SIZE + PREVIEW_SIZE / 2);
-
-                            if (py >= 0 && py < PREVIEW_SIZE) {
-                                const maskRowOffset = py * PREVIEW_SIZE;
-                                for (let x = 0; x < fullW; x++) {
-                                    const fx = (x - fullW / 2) / fullW;
-                                    const px = Math.round(fx * PREVIEW_SIZE + PREVIEW_SIZE / 2);
-
-                                    if (px >= 0 && px < PREVIEW_SIZE) {
-                                        if (mask[maskRowOffset + px] === 1) {
-                                            rowRe[x] = 0;
-                                            rowIm[x] = 0;
-                                        }
-                                    }
+                            const maskRowOffset = y * fullW;
+                            for (let x = 0; x < fullW; x++) {
+                                if (mask[maskRowOffset + x] === 1) {
+                                    rowRe[x] = 0;
+                                    rowIm[x] = 0;
                                 }
                             }
                         }
@@ -164,76 +159,79 @@ export const PeriodicNoiseWorkspace = {
                             }
                         }
                     }
+                    for (let i = 0; i < fullW * fullH; i++) {
+                        data[i * 4 + 3] = srcData[i * 4 + 3];
+                    }
+                }
 
-                    App.actions.saveState();
-                    layer.ctx.putImageData(fullImgData, 0, 0);
-                    App.emit('layer:content');
-                    ws.close(true);
-                }, 40);
+                App.actions.saveState();
+                layer.ctx.putImageData(finalImgData, 0, 0);
+                App.emit('layer:content');
             },
             onCancel: () => {
-                window.removeEventListener('mouseup', onMouseUpGlobal);
-                ws.close(false);
+                leftViewport.destroy();
+                rightViewport.destroy();
             }
         });
 
-        // Split visual pane: Left spectrum domain / Right spatial domain
-        const panelsContainer = UI.createNode('div', { className: 'pn-panels-container' },
-            UI.createNode('div', { className: 'pn-panel' },
-                UI.createNode('div', { className: 'pn-panel-header' },
-                    UI.createNode('span', {}, 'Shifted Log-Fourier Spectrum'),
-                    UI.createNode('span', { id: 'pn-coords-status' }, 'Grayscale Map')
-                ),
-                UI.createNode('div', { className: 'pn-canvas-wrapper', id: 'pn-left-wrapper' },
-                    UI.createNode('canvas', { id: 'pn-fft-canvas', className: 'pn-canvas' })
-                )
-            ),
-            UI.createNode('div', { className: 'pn-panel' },
-                UI.createNode('div', { className: 'pn-panel-header' },
-                    UI.createNode('span', {}, 'Denoised Reconstruction'),
-                    UI.createNode('span', { id: 'pn-status' }, 'Ready')
-                ),
-                UI.createNode('div', { className: 'pn-canvas-wrapper' },
-                    UI.createNode('canvas', { id: 'pn-result-canvas', className: 'pn-canvas' })
-                )
-            )
-        );
-        ws.content.appendChild(panelsContainer);
+        // Split visual pane: Left spectrum domain / Right spatial domain (decoupled movement)
+        const leftPanel = ws.createPanel({ title: 'Shifted Log-Fourier Spectrum', status: 'Computing...' });
+        const rightPanel = ws.createPanel({ title: 'Denoised Reconstruction', status: 'Computing...' });
 
-        const canvas = ws.content.querySelector('#pn-fft-canvas') as HTMLCanvasElement;
-        const resCanvas = ws.content.querySelector('#pn-result-canvas') as HTMLCanvasElement;
-        const ctx = canvas.getContext('2d')!;
-        const resCtx = resCanvas.getContext('2d')!;
+        const canvas = leftPanel.canvas;
+        const resCanvas = rightPanel.canvas;
+        const statusCoordsEl = leftPanel.statusEl;
+        const statusEl = rightPanel.statusEl;
 
-        canvas.width = PREVIEW_SIZE;
-        canvas.height = PREVIEW_SIZE;
-        resCanvas.width = PREVIEW_SIZE;
-        resCanvas.height = PREVIEW_SIZE;
+        canvas.width = fullW;
+        canvas.height = fullH;
+        resCanvas.width = fullW;
+        resCanvas.height = fullH;
+
+        const leftViewport = new App.InteractiveViewport(canvas);
+        const rightViewport = new App.InteractiveViewport(resCanvas);
+
+        let smoothZoom = true;
+        leftViewport.setSmoothing(false);
+        rightViewport.setSmoothing(smoothZoom);
+
+        leftViewport.onDraw = () => {
+            drawFourier();
+        };
+
+        rightViewport.onDraw = () => {
+            drawResult();
+        };
 
         // Spectral backbuffer
         const fftBackbuffer = document.createElement('canvas');
-        fftBackbuffer.width = PREVIEW_SIZE;
-        fftBackbuffer.height = PREVIEW_SIZE;
+        fftBackbuffer.width = fullW;
+        fftBackbuffer.height = fullH;
+
+        const denoisedBackbuffer = document.createElement('canvas');
+        denoisedBackbuffer.width = fullW;
+        denoisedBackbuffer.height = fullH;
 
         let logMag: Float32Array[] = [];
 
         // --- Spectral Processing Methods ---
 
         const computeFourierSpectrum = () => {
-            const { winX, winY } = getWindow2D(PREVIEW_SIZE, PREVIEW_SIZE, windowType);
-            const windowedGray = new Float32Array(PREVIEW_SIZE * PREVIEW_SIZE);
+            invalidateSpikesCache();
+            const { winX, winY } = getWindow2D(fullW, fullH, windowType);
+            const windowedGray = new Float32Array(fullW * fullH);
 
-            for (let y = 0; y < PREVIEW_SIZE; y++) {
+            for (let y = 0; y < fullH; y++) {
                 const wy = winY[y];
-                const row = y * PREVIEW_SIZE;
-                for (let x = 0; x < PREVIEW_SIZE; x++) {
+                const row = y * fullW;
+                for (let x = 0; x < fullW; x++) {
                     windowedGray[row + x] = grayData[row + x] * wy * winX[x];
                 }
             }
 
             const input2D: Float32Array[] = [];
-            for (let y = 0; y < PREVIEW_SIZE; y++) {
-                input2D.push(windowedGray.subarray(y * PREVIEW_SIZE, (y + 1) * PREVIEW_SIZE));
+            for (let y = 0; y < fullH; y++) {
+                input2D.push(windowedGray.subarray(y * fullW, (y + 1) * fullW));
             }
 
             const fftRes = Lib.fft.fft2d(input2D);
@@ -245,13 +243,13 @@ export const PeriodicNoiseWorkspace = {
 
         const renderFourierBackbuffer = () => {
             const bbCtx = fftBackbuffer.getContext('2d')!;
-            const imgData = bbCtx.createImageData(PREVIEW_SIZE, PREVIEW_SIZE);
+            const imgData = bbCtx.createImageData(fullW, fullH);
             const data = imgData.data;
 
             let maxVal = 0;
             let minVal = Infinity;
-            for (let y = 0; y < PREVIEW_SIZE; y++) {
-                for (let x = 0; x < PREVIEW_SIZE; x++) {
+            for (let y = 0; y < fullH; y++) {
+                for (let x = 0; x < fullW; x++) {
                     const val = logMag[y][x];
                     if (val > maxVal) maxVal = val;
                     if (val < minVal) minVal = val;
@@ -260,9 +258,9 @@ export const PeriodicNoiseWorkspace = {
 
             const scale = (1.0 / (maxVal - minVal || 1)) * spectrumGain;
 
-            for (let y = 0; y < PREVIEW_SIZE; y++) {
-                const row = y * PREVIEW_SIZE;
-                for (let x = 0; x < PREVIEW_SIZE; x++) {
+            for (let y = 0; y < fullH; y++) {
+                const row = y * fullW;
+                for (let x = 0; x < fullW; x++) {
                     const idx = (row + x) * 4;
 
                     // Black out zeroed values
@@ -285,83 +283,106 @@ export const PeriodicNoiseWorkspace = {
         };
 
         const drawFourier = () => {
+            const ctx = leftViewport.ctx;
             ctx.save();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.translate(panX, panY);
-            ctx.scale(zoom, zoom);
             ctx.drawImage(fftBackbuffer, 0, 0);
+            ctx.restore();
+            leftViewport.drawOverlay();
+        };
 
-            // Proposed preview markers for automated tools rendered as thin solid blue outlines
+        leftViewport.onDrawOverlay = (ctx) => {
             if (activeTool === 'auto' || activeTool === 'grid') {
                 ctx.strokeStyle = '#00a6ff';
-                ctx.lineWidth = 1.0 / zoom;
+                ctx.lineWidth = 1.5;
                 ctx.setLineDash([]);
+
+                const r = leftViewport.canvasLengthToOverlay(brushSize - 0.5);
 
                 if (activeTool === 'auto') {
                     const proposed = getProposedAutoSpikes();
                     proposed.forEach(p => {
+                        const pt = leftViewport.canvasToOverlay(p.x, p.y);
                         ctx.beginPath();
-                        ctx.arc(p.x, p.y, brushSize, 0, 2 * Math.PI);
+                        ctx.arc(pt.x, pt.y, r, 0, 2 * Math.PI);
                         ctx.stroke();
                         // Symmetric peak counterpart
-                        const symX = (PREVIEW_SIZE - p.x) % PREVIEW_SIZE;
-                        const symY = (PREVIEW_SIZE - p.y) % PREVIEW_SIZE;
+                        const symX = (fullW - p.x) % fullW;
+                        const symY = (fullH - p.y) % fullH;
+                        const symPt = leftViewport.canvasToOverlay(symX, symY);
                         ctx.beginPath();
-                        ctx.arc(symX, symY, brushSize, 0, 2 * Math.PI);
+                        ctx.arc(symPt.x, symPt.y, r, 0, 2 * Math.PI);
                         ctx.stroke();
                     });
                 } else if (activeTool === 'grid') {
                     const proposed = getProposedGrid();
                     proposed.forEach(p => {
+                        const pt = leftViewport.canvasToOverlay(p.x, p.y);
                         ctx.beginPath();
-                        ctx.arc(p.x, p.y, brushSize, 0, 2 * Math.PI);
+                        ctx.arc(pt.x, pt.y, r, 0, 2 * Math.PI);
                         ctx.stroke();
                     });
                 }
             }
-
-            ctx.restore();
 
             // Render interactive circular brush outline
             if (hoverX !== null && hoverY !== null) {
                 ctx.save();
                 ctx.strokeStyle = (activeTool === 'erase') ? '#007acc' : '#ff3333';
                 ctx.lineWidth = 1.5;
-                ctx.setLineDash([4, 4]);
+                const pt = leftViewport.canvasToOverlay(hoverX, hoverY);
+                const r = leftViewport.canvasLengthToOverlay(brushSize - 0.5);
                 ctx.beginPath();
-                ctx.arc(hoverX, hoverY, brushSize * zoom, 0, 2 * Math.PI);
+                ctx.arc(pt.x, pt.y, r, 0, 2 * Math.PI);
                 ctx.stroke();
                 ctx.restore();
             }
         };
 
+        const drawResult = () => {
+            const ctx = rightViewport.ctx;
+            ctx.save();
+            ctx.clearRect(0, 0, resCanvas.width, resCanvas.height);
+            rightViewport.applyTransform();
+            ctx.drawImage(denoisedBackbuffer, 0, 0);
+            ctx.restore();
+        };
+
         const drawCircleInMask = (cx: number, cy: number, r: number, val: number) => {
-            const rSq = r * r;
-            const size = PREVIEW_SIZE;
-            const centerOfFFT = size / 2;
+            const rSq = (r - 1) * (r - 1);
+            const centerX = Math.floor(fullW / 2);
+            const centerY = Math.floor(fullH / 2);
 
-            for (let dy = -r; dy <= r; dy++) {
+            for (let dy = -(r - 1); dy <= r - 1; dy++) {
                 const y = cy + dy;
-                if (y < 0 || y >= size) continue;
-                const rowOffset = y * size;
+                if (y < 0 || y >= fullH) continue;
+                const rowOffset = y * fullW;
 
-                for (let dx = -r; dx <= r; dx++) {
+                for (let dx = -(r - 1); dx <= r - 1; dx++) {
                     const x = cx + dx;
-                    if (x < 0 || x >= size) continue;
+                    if (x < 0 || x >= fullW) continue;
 
                     if (dx * dx + dy * dy <= rSq) {
                         // Protect DC component (fundamental average luminance)
-                        const distToCenter = Math.sqrt((x - centerOfFFT) ** 2 + (y - centerOfFFT) ** 2);
+                        const distToCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
                         if (distToCenter < 5) continue;
 
-                        mask[rowOffset + x] = val;
+                        if (mask[rowOffset + x] !== val) {
+                            mask[rowOffset + x] = val;
+                            hasDrawnSinceMouseDown = true;
+                            invalidateSpikesCache();
+                        }
 
                         // Maintain conjugate symmetry
-                        const symX = (size - x) % size;
-                        const symY = (size - y) % size;
-                        const symDist = Math.sqrt((symX - centerOfFFT) ** 2 + (symY - centerOfFFT) ** 2);
+                        const symX = (fullW - x) % fullW;
+                        const symY = (fullH - y) % fullH;
+                        const symDist = Math.sqrt((symX - centerX) ** 2 + (symY - centerY) ** 2);
                         if (symDist >= 5) {
-                            mask[symY * size + symX] = val;
+                            if (mask[symY * fullW + symX] !== val) {
+                                mask[symY * fullW + symX] = val;
+                                hasDrawnSinceMouseDown = true;
+                                invalidateSpikesCache();
+                            }
                         }
                     }
                 }
@@ -369,31 +390,30 @@ export const PeriodicNoiseWorkspace = {
         };
 
         const solvePreview = () => {
-            const statusEl = ws.overlay.querySelector('#pn-status')!;
             statusEl.textContent = 'Calculating IFFT...';
 
             setTimeout(() => {
                 // Image processing bypassed window calculations
                 for (let ch = 0; ch < 3; ch++) {
-                    const channelData = new Float32Array(PREVIEW_SIZE * PREVIEW_SIZE);
-                    for (let i = 0; i < PREVIEW_SIZE * PREVIEW_SIZE; i++) {
-                        channelData[i] = previewSrcImgData[i * 4 + ch];
+                    const channelData = new Float32Array(fullW * fullH);
+                    for (let i = 0; i < fullW * fullH; i++) {
+                        channelData[i] = srcData[i * 4 + ch];
                     }
 
                     const real2D: Float32Array[] = [];
-                    for (let y = 0; y < PREVIEW_SIZE; y++) {
-                        real2D.push(channelData.subarray(y * PREVIEW_SIZE, (y + 1) * PREVIEW_SIZE));
+                    for (let y = 0; y < fullH; y++) {
+                        real2D.push(channelData.subarray(y * fullW, (y + 1) * fullW));
                     }
 
                     const fftRes = Lib.fft.fft2d(real2D);
                     const shifted = Lib.fft.shift(fftRes);
 
                     // Apply notch mask logic
-                    for (let y = 0; y < PREVIEW_SIZE; y++) {
+                    for (let y = 0; y < fullH; y++) {
                         const rowRe = shifted.re[y];
                         const rowIm = shifted.im[y];
-                        const maskRow = y * PREVIEW_SIZE;
-                        for (let x = 0; x < PREVIEW_SIZE; x++) {
+                        const maskRow = y * fullW;
+                        for (let x = 0; x < fullW; x++) {
                             if (mask[maskRow + x] === 1) {
                                 rowRe[x] = 0;
                                 rowIm[x] = 0;
@@ -405,26 +425,23 @@ export const PeriodicNoiseWorkspace = {
                     const ifftRes = Lib.fft.ifft2d(unshifted.re, unshifted.im);
 
                     // Reconstruct denoised spatial data directly without windows
-                    for (let y = 0; y < PREVIEW_SIZE; y++) {
-                        const row = y * PREVIEW_SIZE;
+                    for (let y = 0; y < fullH; y++) {
+                        const row = y * fullW;
                         const rowRe = ifftRes.re[y];
-                        for (let x = 0; x < PREVIEW_SIZE; x++) {
+                        for (let x = 0; x < fullW; x++) {
                             previewDenoisedData[(row + x) * 4 + ch] = Math.max(0, Math.min(255, rowRe[x]));
                         }
                     }
                 }
 
-                for (let i = 0; i < PREVIEW_SIZE * PREVIEW_SIZE; i++) {
-                    previewDenoisedData[i * 4 + 3] = 255;
+                for (let i = 0; i < fullW * fullH; i++) {
+                    previewDenoisedData[i * 4 + 3] = srcData[i * 4 + 3];
                 }
 
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = PREVIEW_SIZE;
-                tempCanvas.height = PREVIEW_SIZE;
-                tempCanvas.getContext('2d')!.putImageData(new ImageData(previewDenoisedData, PREVIEW_SIZE, PREVIEW_SIZE), 0, 0);
+                denoisedBackbuffer.getContext('2d')!.putImageData(new ImageData(previewDenoisedData, fullW, fullH), 0, 0);
 
-                resCtx.clearRect(0, 0, resCanvas.width, resCanvas.height);
-                resCtx.drawImage(tempCanvas, 0, 0, resCanvas.width, resCanvas.height);
+                drawResult();
+                isResultActual = true;
                 statusEl.textContent = 'Preview Updated';
             }, 30);
         };
@@ -447,9 +464,15 @@ export const PeriodicNoiseWorkspace = {
             if (historyIndex > 0) {
                 historyIndex--;
                 mask.set(historyStack[historyIndex]);
+                invalidateSpikesCache();
                 renderFourierBackbuffer();
                 drawFourier();
-                if (livePreview) solvePreview();
+                if (livePreview) {
+                    solvePreview();
+                } else {
+                    isResultActual = false;
+                    statusEl.textContent = 'Preview out of date';
+                }
                 updateHistoryButtons();
             }
         };
@@ -458,9 +481,15 @@ export const PeriodicNoiseWorkspace = {
             if (historyIndex < historyStack.length - 1) {
                 historyIndex++;
                 mask.set(historyStack[historyIndex]);
+                invalidateSpikesCache();
                 renderFourierBackbuffer();
                 drawFourier();
-                if (livePreview) solvePreview();
+                if (livePreview) {
+                    solvePreview();
+                } else {
+                    isResultActual = false;
+                    statusEl.textContent = 'Preview out of date';
+                }
                 updateHistoryButtons();
             }
         };
@@ -475,15 +504,17 @@ export const PeriodicNoiseWorkspace = {
         // --- Spike and Grid Proposing Functions ---
 
         const getProposedAutoSpikes = (): Array<{ x: number; y: number; val: number }> => {
+            if (cachedProposedSpikes) return cachedProposedSpikes;
+
             const candidates: Array<{ x: number; y: number; val: number; salience: number }> = [];
-            const cx = PREVIEW_SIZE / 2;
-            const cy = PREVIEW_SIZE / 2;
+            const cx = Math.floor(fullW / 2);
+            const cy = Math.floor(fullH / 2);
             const safetyRadius = minDCDistance;
 
             // Find local maxima first
-            for (let y = 1; y < PREVIEW_SIZE - 1; y++) {
-                const rowOffset = y * PREVIEW_SIZE;
-                for (let x = 1; x < PREVIEW_SIZE - 1; x++) {
+            for (let y = 1; y < fullH - 1; y++) {
+                const rowOffset = y * fullW;
+                for (let x = 1; x < fullW - 1; x++) {
                     const dx = x - cx;
                     const dy = y - cy;
                     if (dx * dx + dy * dy < safetyRadius * safetyRadius) continue;
@@ -503,10 +534,10 @@ export const PeriodicNoiseWorkspace = {
                         const windowSize = 7; // radius of 7 -> 15x15 window
                         for (let dy2 = -windowSize; dy2 <= windowSize; dy2++) {
                             const ny = y + dy2;
-                            if (ny < 0 || ny >= PREVIEW_SIZE) continue;
+                            if (ny < 0 || ny >= fullH) continue;
                             for (let dx2 = -windowSize; dx2 <= windowSize; dx2++) {
                                 const nx = x + dx2;
-                                if (nx < 0 || nx >= PREVIEW_SIZE) continue;
+                                if (nx < 0 || nx >= fullW) continue;
                                 // Guard band check: skip 3x3 around center
                                 if (Math.abs(dx2) <= 1 && Math.abs(dy2) <= 1) continue;
                                 
@@ -534,15 +565,17 @@ export const PeriodicNoiseWorkspace = {
                 const maxSalience = candidates[0].salience;
                 const cutoff = maxSalience * (spikeThreshold / 100);
                 const filtered = candidates.filter(c => c.salience >= cutoff);
-                return filtered.slice(0, maxSpikes);
+                cachedProposedSpikes = filtered.slice(0, maxSpikes);
+            } else {
+                cachedProposedSpikes = [];
             }
-            return [];
+            return cachedProposedSpikes;
         };
 
         const getProposedGrid = (): Array<{ x: number; y: number }> => {
             const list: Array<{ x: number; y: number }> = [];
-            const cx = PREVIEW_SIZE / 2;
-            const cy = PREVIEW_SIZE / 2;
+            const cx = Math.floor(fullW / 2);
+            const cy = Math.floor(fullH / 2);
 
             if (gridX <= 1 && gridY <= 1) return [];
 
@@ -557,8 +590,8 @@ export const PeriodicNoiseWorkspace = {
             const vy = gridY * cos;
 
             // Estimate limits for indices to cover the canvas safely
-            const maxI = Math.ceil(PREVIEW_SIZE / (gridX || 1)) + 5;
-            const maxJ = Math.ceil(PREVIEW_SIZE / (gridY || 1)) + 5;
+            const maxI = Math.ceil(fullW / (gridX || 1)) + 5;
+            const maxJ = Math.ceil(fullH / (gridY || 1)) + 5;
 
             const limitI = Math.min(150, maxI);
             const limitJ = Math.min(150, maxJ);
@@ -570,7 +603,7 @@ export const PeriodicNoiseWorkspace = {
                     const x = Math.round(cx + i * ux + j * vx);
                     const y = Math.round(cy + i * uy + j * vy);
 
-                    if (x >= 0 && x < PREVIEW_SIZE && y >= 0 && y < PREVIEW_SIZE) {
+                    if (x >= 0 && x < fullW && y >= 0 && y < fullH) {
                         list.push({ x, y });
                     }
                 }
@@ -581,121 +614,105 @@ export const PeriodicNoiseWorkspace = {
         const commitAutoSpikes = () => {
             const proposed = getProposedAutoSpikes();
             if (proposed.length === 0) return;
+            hasDrawnSinceMouseDown = false;
             proposed.forEach(cand => {
                 drawCircleInMask(cand.x, cand.y, brushSize, 1);
             });
-            pushHistoryState();
-            renderFourierBackbuffer();
-            drawFourier();
-            if (livePreview) solvePreview();
+            if (hasDrawnSinceMouseDown) {
+                pushHistoryState();
+                renderFourierBackbuffer();
+                drawFourier();
+                if (livePreview) {
+                    solvePreview();
+                } else {
+                    isResultActual = false;
+                    statusEl.textContent = 'Preview out of date';
+                }
+            }
+            hasDrawnSinceMouseDown = false;
         };
 
         const commitHarmonicGrid = () => {
             const proposed = getProposedGrid();
             if (proposed.length === 0) return;
+            hasDrawnSinceMouseDown = false;
             proposed.forEach(p => {
                 drawCircleInMask(p.x, p.y, brushSize, 1);
             });
-            pushHistoryState();
-            renderFourierBackbuffer();
-            drawFourier();
-            if (livePreview) solvePreview();
-        };
-
-        // --- Mouse and Interaction Bindings ---
-
-        const getUntransformedCoords = (clientX: number, clientY: number) => {
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = clientX - rect.left;
-            const mouseY = clientY - rect.top;
-            return {
-                x: Math.round((mouseX - panX) / zoom),
-                y: Math.round((mouseY - panY) / zoom)
-            };
-        };
-
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomFactor = 1.15;
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            const fftX = (mouseX - panX) / zoom;
-            const fftY = (mouseY - panY) / zoom;
-
-            if (e.deltaY < 0) {
-                zoom = Math.min(25.0, zoom * zoomFactor);
-            } else {
-                zoom = Math.max(0.4, zoom / zoomFactor);
-            }
-
-            panX = mouseX - fftX * zoom;
-            panY = mouseY - fftY * zoom;
-
-            drawFourier();
-        });
-
-        canvas.onmousedown = (e) => {
-            e.preventDefault();
-            if (e.button === 1) {
-                // Middle click for panning
-                isPanning = true;
-                startX = e.clientX - panX;
-                startY = e.clientY - panY;
-            } else {
-                isDrawing = true;
-                const coords = getUntransformedCoords(e.clientX, e.clientY);
-                // Right click functions as an instant eraser regardless of current tool selection
-                const val = (e.button === 2 || activeTool === 'erase') ? 0 : 1;
-                drawCircleInMask(coords.x, coords.y, brushSize, val);
+            if (hasDrawnSinceMouseDown) {
+                pushHistoryState();
                 renderFourierBackbuffer();
-                if (livePreview) solvePreview();
                 drawFourier();
+                if (livePreview) {
+                    solvePreview();
+                } else {
+                    isResultActual = false;
+                    statusEl.textContent = 'Preview out of date';
+                }
             }
+            hasDrawnSinceMouseDown = false;
         };
 
-        canvas.onmousemove = (e) => {
-            const rect = canvas.getBoundingClientRect();
-            hoverX = e.clientX - rect.left;
-            hoverY = e.clientY - rect.top;
+        // --- Viewport Interactive Handlers ---
 
-            const coords = getUntransformedCoords(e.clientX, e.clientY);
-            const statusCoordsEl = ws.overlay.querySelector('#pn-coords-status')!;
-            statusCoordsEl.textContent = `Freq Domain: [X: ${coords.x}, Y: ${coords.y}] | Zoom: ${Math.round(zoom * 100)}%`;
-
-            if (isDrawing) {
-                const val = ((e.buttons & 2) === 2 || activeTool === 'erase') ? 0 : 1;
-                drawCircleInMask(coords.x, coords.y, brushSize, val);
+        leftViewport.onMouseDown = (e) => {
+            hasDrawnSinceMouseDown = false;
+            const val = (e.isRightClick || activeTool === 'erase') ? 0 : 1;
+            drawCircleInMask(e.x, e.y, brushSize, val);
+            if (hasDrawnSinceMouseDown) {
                 renderFourierBackbuffer();
-                if (livePreview) solvePreview();
-            } else if (isPanning) {
-                panX = e.clientX - startX;
-                panY = e.clientY - startY;
+                isResultActual = false;
+                statusEl.textContent = 'Preview out of date';
             }
             drawFourier();
         };
 
-        canvas.onmouseleave = () => {
+        leftViewport.onMouseMove = (e) => {
+            const val = (e.isRightClick || activeTool === 'erase') ? 0 : 1;
+            const oldDrawn = hasDrawnSinceMouseDown;
+            hasDrawnSinceMouseDown = false;
+            drawCircleInMask(e.x, e.y, brushSize, val);
+            if (hasDrawnSinceMouseDown) {
+                renderFourierBackbuffer();
+                isResultActual = false;
+                statusEl.textContent = 'Preview out of date';
+            }
+            if (oldDrawn || hasDrawnSinceMouseDown) {
+                hasDrawnSinceMouseDown = true;
+            }
+        };
+
+        leftViewport.onMouseUp = () => {
+            if (hasDrawnSinceMouseDown) {
+                pushHistoryState();
+                if (livePreview) {
+                    solvePreview();
+                } else {
+                    isResultActual = false;
+                    statusEl.textContent = 'Preview out of date';
+                }
+                hasDrawnSinceMouseDown = false;
+            }
+            drawFourier();
+        };
+
+        leftViewport.onHover = (x, y, clientX, clientY) => {
+            if (x !== null && y !== null) {
+                hoverX = x;
+                hoverY = y;
+                statusCoordsEl.textContent = `Freq Domain: [X: ${x}, Y: ${y}] | Zoom: ${Math.round(leftViewport.zoom * 100)}%`;
+            } else {
+                hoverX = null;
+                hoverY = null;
+            }
+            drawFourier();
+        };
+
+        leftViewport.onMouseLeave = () => {
             hoverX = null;
             hoverY = null;
             drawFourier();
         };
-
-        const onMouseUpGlobal = () => {
-            if (isDrawing || isPanning) {
-                if (isDrawing) {
-                    pushHistoryState();
-                }
-                isDrawing = false;
-                isPanning = false;
-                if (livePreview) solvePreview();
-                drawFourier();
-            }
-        };
-        window.addEventListener('mouseup', onMouseUpGlobal);
-
-        canvas.oncontextmenu = (e) => e.preventDefault();
 
         // --- Construct Workspace Controls (Sidebar) ---
 
@@ -733,15 +750,15 @@ export const PeriodicNoiseWorkspace = {
         // Auto Detect Parameters Panel
         autoPanel.appendChild(UI.createSliderRow({
             label: 'Min DC Distance', min: 2, max: 100, step: 1, value: minDCDistance,
-            onInput: (v) => { minDCDistance = parseInt(v); drawFourier(); }
+            onInput: (v) => { minDCDistance = parseInt(v); invalidateSpikesCache(); drawFourier(); }
         }));
         autoPanel.appendChild(UI.createSliderRow({
             label: 'Peak Cutoff %', min: 20, max: 95, step: 1, value: spikeThreshold,
-            onInput: (v) => { spikeThreshold = parseInt(v); drawFourier(); }
+            onInput: (v) => { spikeThreshold = parseInt(v); invalidateSpikesCache(); drawFourier(); }
         }));
         autoPanel.appendChild(UI.createSliderRow({
             label: 'Max Spikes', min: 2, max: 40, step: 1, value: maxSpikes,
-            onInput: (v) => { maxSpikes = parseInt(v); drawFourier(); }
+            onInput: (v) => { maxSpikes = parseInt(v); invalidateSpikesCache(); drawFourier(); }
         }));
         autoPanel.appendChild(UI.createButton({
             label: 'Commit Proposed Peaks', className: 'btn', style: 'width:100%; margin-top:5px;',
@@ -750,12 +767,13 @@ export const PeriodicNoiseWorkspace = {
         ws.sidebar.appendChild(autoPanel);
 
         // Harmonic Grid Parameters Panel
+        const maxGridSpacing = Math.max(512, Math.max(fullW, fullH));
         gridPanel.appendChild(UI.createSliderRow({
-            label: 'Grid Spacing X', min: 4, max: 512, step: 1, value: gridX,
+            label: 'Grid Spacing X', min: 4, max: maxGridSpacing, step: 1, value: gridX,
             onInput: (v) => { gridX = parseInt(v); drawFourier(); }
         }));
         gridPanel.appendChild(UI.createSliderRow({
-            label: 'Grid Spacing Y', min: 4, max: 512, step: 1, value: gridY,
+            label: 'Grid Spacing Y', min: 4, max: maxGridSpacing, step: 1, value: gridY,
             onInput: (v) => { gridY = parseInt(v); drawFourier(); }
         }));
         gridPanel.appendChild(UI.createSliderRow({
@@ -784,9 +802,15 @@ export const PeriodicNoiseWorkspace = {
             onClick: () => {
                 mask.fill(0);
                 pushHistoryState();
+                invalidateSpikesCache();
                 renderFourierBackbuffer();
                 drawFourier();
-                if (livePreview) solvePreview();
+                if (livePreview) {
+                    solvePreview();
+                } else {
+                    isResultActual = false;
+                    statusEl.textContent = 'Preview out of date';
+                }
             }
         });
 
@@ -795,9 +819,9 @@ export const PeriodicNoiseWorkspace = {
 
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'FFT Viewport Controls'));
 
-        const zoomInBtn = UI.createButton({ label: 'Zoom +', className: 'btn', onClick: () => { zoom = Math.min(25, zoom * 1.25); drawFourier(); } });
-        const zoomOutBtn = UI.createButton({ label: 'Zoom -', className: 'btn', onClick: () => { zoom = Math.max(0.4, zoom / 1.25); drawFourier(); } });
-        const resetZoomBtn = UI.createButton({ label: 'Reset Zoom', className: 'btn cancel-btn', onClick: () => { zoom = 1.0; panX = 0; panY = 0; drawFourier(); } });
+        const zoomInBtn = UI.createButton({ label: 'Zoom +', className: 'btn', onClick: () => { leftViewport.zoom = Math.min(25, leftViewport.zoom * 1.25); leftViewport.onDraw!(); } });
+        const zoomOutBtn = UI.createButton({ label: 'Zoom -', className: 'btn', onClick: () => { leftViewport.zoom = Math.max(0.2, leftViewport.zoom / 1.25); leftViewport.onDraw!(); } });
+        const resetZoomBtn = UI.createButton({ label: 'Reset Zoom', className: 'btn cancel-btn', onClick: () => { leftViewport.reset(); } });
 
         ws.sidebar.appendChild(UI.createNode('div', { style: 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;' }, zoomInBtn, zoomOutBtn, resetZoomBtn));
 
@@ -838,6 +862,14 @@ export const PeriodicNoiseWorkspace = {
             }
         }));
 
+        ws.sidebar.appendChild(UI.createCheckbox({
+            label: 'Smooth zoom', value: smoothZoom,
+            onChange: (v) => {
+                smoothZoom = v;
+                rightViewport.setSmoothing(smoothZoom);
+            }
+        }));
+
         const forceSolveBtn = UI.createButton({
             label: 'Force Preview Refresh', className: 'btn',
             style: 'width:100%; padding:10px; font-weight:bold;',
@@ -846,11 +878,14 @@ export const PeriodicNoiseWorkspace = {
         ws.sidebar.appendChild(forceSolveBtn);
 
         // Bootstrap visual computation and open workspace
-        computeFourierSpectrum();
-        renderFourierBackbuffer();
-        solvePreview();
-        updateHistoryButtons();
         ws.show();
+
+        setTimeout(() => {
+            computeFourierSpectrum();
+            solvePreview();
+            updateHistoryButtons();
+            statusCoordsEl.textContent = 'Grayscale Map';
+        }, 50);
     },
 
     injectStyles() {

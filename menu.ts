@@ -29,7 +29,10 @@ export const Menu = {
             label: 'Select',
             items: [
                 { label: 'Deselect (Ctrl+A)', action: () => App.actions.deselect() },
-                { label: 'Delete Selection (Del)', action: () => App.actions.deleteSelection() }
+                { label: 'Inverse Selection', action: () => App.actions.inverseSelection() },
+                { label: 'Delete Selection (Del)', action: () => App.actions.deleteSelection() },
+                { label: 'Save Selection...', action: () => App.actions.openSaveSelectionDialog() },
+                { label: 'Load Selection...', action: () => App.actions.openLoadSelectionDialog() }
             ]
         },
         { label: 'Transform', items: [] },
@@ -66,6 +69,7 @@ export const Menu = {
             items: [
                 { label: 'New Empty Layer', action: () => App.actions.addEmptyLayer() },
                 { label: 'Duplicate Layer', action: () => App.actions.duplicateLayer() },
+                { label: 'Merge Layer Down', action: () => App.actions.mergeLayerDown() },
                 { label: 'Merge All Layers', action: () => App.actions.mergeAll() }
             ]
         },

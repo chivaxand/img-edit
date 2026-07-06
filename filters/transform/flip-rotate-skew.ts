@@ -1,18 +1,20 @@
 import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 Filters.register('skew-rotate', {
     name: 'Skew / Rotate',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Transform',
         label: 'Skew / Rotate...',
         order: 2
     },
 
-    apply(l: Layer, p: any) {
+    apply(context: FilterContext) {
+        const l = context.layer;
+        const p = context.values;
         const origW = p.origW !== undefined ? p.origW : l.width;
         const origH = p.origH !== undefined ? p.origH : l.height;
         const origX = p.origX !== undefined ? p.origX : l.x;
@@ -148,14 +150,16 @@ Filters.register('skew-rotate', {
 
 Filters.register('flip-rotate', {
     name: 'Flip / Rotate',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Transform',
         label: 'Flip / Rotate...',
         order: 3
     },
 
-    apply(l: Layer, state: any) {
+    apply(context: FilterContext) {
+        const l = context.layer;
+        const state = context.values;
         const origW = state.origW !== undefined ? state.origW : l.width;
         const origH = state.origH !== undefined ? state.origH : l.height;
         const origX = state.origX !== undefined ? state.origX : l.x;

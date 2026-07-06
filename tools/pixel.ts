@@ -53,7 +53,7 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
     const sr = data[idx], sg = data[idx+1], sb = data[idx+2], sa = data[idx+3];
     
     // If filling with same color (and no tolerance), abort to prevent infinite loop/no-op
-    if (!isSelection && App.utils.colorsMatch(sr, sg, sb, sa, color.r, color.g, color.b, 255, 0)) return;
+    if (!isSelection && !options.cut && App.utils.colorsMatch(sr, sg, sb, sa, color.r, color.g, color.b, 255, 0)) return;
 
     // Handle Active Selection Constraint
     let selData: Uint8ClampedArray | null = null;
@@ -207,8 +207,13 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
 
         // Draw the cut-out shape onto the layer
         layer.ctx.save();
-        layer.ctx.globalCompositeOperation = 'source-over';
-        layer.ctx.drawImage(cCanvas, 0, 0);
+        if (options.cut) {
+            layer.ctx.globalCompositeOperation = 'destination-out';
+            layer.ctx.drawImage(mCanvas, 0, 0);
+        } else {
+            layer.ctx.globalCompositeOperation = 'source-over';
+            layer.ctx.drawImage(cCanvas, 0, 0);
+        }
         layer.ctx.restore();
         
         return null;
@@ -223,11 +228,20 @@ App.registerTool({
     id: 'bucket',
     icon: '🪣',
     title: 'Flood Fill (G)',
-    settings: { tolerance: 32, contiguous: true, smoothFill: false },
+    settings: { tolerance: 50, contiguous: true, smoothFill: false, mode: 'fill' },
     onSelect(panel: HTMLElement) {
         panel.appendChild(UI.createSliderRow({ label: 'Tolerance', min: 0, max: 255, value: this.settings.tolerance, onInput: (v: string) => this.settings.tolerance = parseInt(v) }));
         panel.appendChild(UI.createCheckbox({ label: 'Contiguous', value: this.settings.contiguous, onChange: (v: boolean) => this.settings.contiguous = v }));
         panel.appendChild(UI.createCheckbox({ label: 'Smooth', value: this.settings.smoothFill, onChange: (v: boolean) => this.settings.smoothFill = v }));
+        panel.appendChild(UI.createRadioGroup({
+            label: 'Mode', layout: 'row',
+            options: [
+                { value: 'fill', text: 'Fill Color' },
+                { value: 'cut', text: 'Cut (Erase)' }
+            ],
+            value: this.settings.mode || 'fill',
+            onChange: (v: string) => this.settings.mode = v
+        }));
     },
     onMouseDown(e: MouseEvent) {
         const l = App.utils.getActive();
@@ -237,15 +251,17 @@ App.registerTool({
         App.actions.saveState();
         const pos = App.utils.getPos(e);
         const rgb = App.utils.hexToRgb(App.state.fg);
+        const isCut = this.settings.mode === 'cut';
         
         performFloodFill(l, pos.x, pos.y, {
             color: rgb,
             tolerance: this.settings.tolerance,
             contiguous: this.settings.contiguous,
             smooth: this.settings.smoothFill,
-            isSelection: false
+            isSelection: false,
+            cut: isCut
         });
-        App.recordAction(`api.floodFill(${Math.round(pos.x)}, ${Math.round(pos.y)}, '${App.state.fg}', ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothFill});`);
+        App.recordAction(`api.floodFill(${Math.round(pos.x)}, ${Math.round(pos.y)}, '${App.state.fg}', ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothFill}, ${isCut});`);
         App.render();
     }
 });

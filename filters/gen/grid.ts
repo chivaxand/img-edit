@@ -1,4 +1,4 @@
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
@@ -8,7 +8,7 @@ Filters.register('grid', {
     menu: {
         path: 'Generate',
         label: 'Grid...',
-        order: 4
+        order: 5
     },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {

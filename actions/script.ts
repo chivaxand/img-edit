@@ -18,11 +18,15 @@ export interface IScriptAPI {
     moveActiveLayer(dir: number): void;
     selectNone(): void;
     selectLayerAlpha(): void;
+    deleteSelection(): void;
+    inverseSelection(): void;
+    saveSelection(mode?: 'content' | 'mask', inverse?: boolean): void;
+    loadSelection(layerIndex?: number, mode?: 'alpha' | 'grayscale', inverse?: boolean): void;
     growSelection(px: number): void;
     fillSelection(colorHex: string): void;
     applyFilter(filterId: string, params?: Record<string, any>): void;
     setColor(type: string, val: string): void;
-    floodFill(x: number, y: number, colorHex: string, tolerance: number, contiguous: boolean, smooth: boolean): void;
+    floodFill(x: number, y: number, colorHex: string, tolerance: number, contiguous: boolean, smooth: boolean, cut?: boolean): void;
     magicWandSelect(x: number, y: number, tolerance: number, contiguous: boolean, smooth: boolean): void;
     crop(x: number, y: number, w: number, h: number): void;
     drawLine(sx: number, sy: number, ex: number, ey: number, strokeWidth: number, startCap: string, endCap: string, colorHex: string): void;
@@ -87,26 +91,7 @@ export const ScriptAPI: IScriptAPI = {
         }
     },
     mergeActiveLayerDown() {
-        const l = App.utils.getActive();
-        if (!l) return;
-        const idx = App.state.layers.indexOf(l);
-        if (idx < 0 || idx >= App.state.layers.length - 1) return;
-        const bottomLayer = App.state.layers[idx + 1];
-        const temp = document.createElement('canvas');
-        temp.width = bottomLayer.canvas.width; 
-        temp.height = bottomLayer.canvas.height;
-        const tempCtx = temp.getContext('2d')!;
-        tempCtx.drawImage(bottomLayer.canvas, 0, 0);
-        tempCtx.save();
-        tempCtx.globalAlpha = l.opacity;
-        tempCtx.globalCompositeOperation = l.blend as GlobalCompositeOperation;
-        tempCtx.drawImage(l.canvas, l.x - bottomLayer.x, l.y - bottomLayer.y, l.width, l.height);
-        tempCtx.restore();
-        bottomLayer.ctx.clearRect(0, 0, bottomLayer.width, bottomLayer.height);
-        bottomLayer.ctx.drawImage(temp, 0, 0);
-        App.state.layers.splice(idx, 1);
-        App.actions.setActiveLayer(bottomLayer.id);
-        App.emit('layers:structure');
+        App.actions.mergeLayerDown();
     },
     moveActiveLayer(dir: number) {
         App.actions.moveLayer(dir);
@@ -143,6 +128,18 @@ export const ScriptAPI: IScriptAPI = {
         App.state.selection.outline = null;
         App.actions.updateSelectionOutline();
         App.render();
+    },
+    deleteSelection() {
+        App.actions.deleteSelection();
+    },
+    inverseSelection() {
+        App.actions.inverseSelection();
+    },
+    saveSelection(mode: 'content' | 'mask' = 'content', inverse: boolean = false) {
+        App.actions.saveSelection(mode, inverse);
+    },
+    loadSelection(layerIndex: number = 0, mode: 'alpha' | 'grayscale' = 'alpha', inverse: boolean = false) {
+        App.actions.loadSelection(layerIndex, mode, inverse);
     },
     growSelection(px: number) {
         const sel = App.state.selection;
@@ -218,7 +215,7 @@ export const ScriptAPI: IScriptAPI = {
         App.actions.setColor(type, val);
     },
 
-    floodFill(x: number, y: number, colorHex: string, tolerance: number, contiguous: boolean, smooth: boolean) {
+    floodFill(x: number, y: number, colorHex: string, tolerance: number, contiguous: boolean, smooth: boolean, cut?: boolean) {
         const l = App.utils.getActive();
         if (!l) return;
         const rgb = App.utils.hexToRgb(colorHex) || { r: 0, g: 0, b: 0 };
@@ -229,7 +226,8 @@ export const ScriptAPI: IScriptAPI = {
                 tolerance,
                 contiguous,
                 smooth,
-                isSelection: false
+                isSelection: false,
+                cut: !!cut
             });
         }
     },
@@ -439,17 +437,13 @@ api.selectNone();`;
 
         const textarea = UI.createNode('textarea', {
             id: 'macro-editor',
+            className: 'ui-textarea',
             style: {
-                width: '100%',
                 height: '220px',
                 fontFamily: 'monospace',
-                fontSize: '12px',
                 background: '#1e1e1e',
                 color: '#d4d4d4',
                 border: '1px solid #3e3e3e',
-                borderRadius: '4px',
-                padding: '8px',
-                boxSizing: 'border-box',
                 whiteSpace: 'pre',
                 resize: 'vertical'
             },

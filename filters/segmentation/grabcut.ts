@@ -1,7 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 // --- Neural Network (MLP) for feature modeling ---
 class MiniMLP {
@@ -515,12 +515,12 @@ export const GrabCutFilter = {
         // 2. Build Sidebar Controls
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Drawing Tools'));
 
-        const fgBtn = UI.createNode('button', { className: 'gc-tool-btn fg-tool active' },
+        const fgBtn = UI.createNode('button', { className: 'fs-tool-btn fg-tool active' },
             UI.createNode('span', { style: 'display:inline-block; width:10px; height:10px; background-color:#4caf50; border-radius:50%' }),
             'Foreground'
         ) as HTMLButtonElement;
 
-        const bgBtn = UI.createNode('button', { className: 'gc-tool-btn bg-tool' },
+        const bgBtn = UI.createNode('button', { className: 'fs-tool-btn bg-tool' },
             UI.createNode('span', { style: 'display:inline-block; width:10px; height:10px; background-color:#2196f3; border-radius:50%' }),
             'Background'
         ) as HTMLButtonElement;
@@ -536,7 +536,7 @@ export const GrabCutFilter = {
             fgBtn.classList.remove('active');
         };
 
-        const toolGroup = UI.createNode('div', { className: 'gc-tool-group' }, fgBtn, bgBtn);
+        const toolGroup = UI.createNode('div', { className: 'fs-tool-group' }, fgBtn, bgBtn);
         ws.sidebar.appendChild(toolGroup);
 
         ws.sidebar.appendChild(UI.createSliderRow({
@@ -1047,12 +1047,8 @@ export const GrabCutFilter = {
         const style = document.createElement('style');
         style.id = 'grabcut-filter-style';
         style.textContent = `
-            .gc-tool-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-            .gc-tool-btn { background-color: #121212; border: 1px solid #333; color: #ccc; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s ease; font-weight: bold; }
-            .gc-tool-btn:hover { background-color: #2a2a2a; border-color: #007acc; }
-            .gc-tool-btn.active { border-color: #007acc; background-color: rgba(0, 122, 204, 0.15); color: #fff; }
-            .gc-tool-btn.fg-tool.active { border-color: #4caf50; background-color: rgba(76, 175, 80, 0.15); }
-            .gc-tool-btn.bg-tool.active { border-color: #2196f3; background-color: rgba(33, 150, 243, 0.15); }
+            .fs-tool-btn.fg-tool.active { border-color: #4caf50; background-color: rgba(76, 175, 80, 0.15); }
+            .fs-tool-btn.bg-tool.active { border-color: #2196f3; background-color: rgba(33, 150, 243, 0.15); }
         `;
         document.head.appendChild(style);
     }
@@ -1093,13 +1089,14 @@ function convertRgbToLab(data: Uint8ClampedArray, w: number, h: number): Float32
 
 Filters.register('grabcut', {
     name: 'Hybrid GrabCut',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Filter/Segmentation',
         label: 'Hybrid GrabCut...',
         order: 1
     },
-    apply(l: Layer) {
+    apply(ctx: FilterContext) {
+        const l = ctx.layer;
         GrabCutFilter.open();
     }
 });

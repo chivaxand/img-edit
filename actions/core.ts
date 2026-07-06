@@ -1,9 +1,10 @@
 import { App, AppActions } from '~/app';
+import { UI } from '~/ui';
 
 export const coreActions: Pick<AppActions, 
     'saveState' | 'undo' | 'resizeCanvas' | 'fitCanvasToLayers' | 
-    'setTool' | 'setColor' | 'download' | 'deselect' | 'setZoom' | 
-    'stepZoom' | 'exportBase64' | 'deleteSelection' | 'updateSelectionOutline'
+    'setTool' | 'setColor' | 'download' | 'setZoom' | 
+    'stepZoom' | 'exportBase64'
 > = {
     saveState() { App.history.push(App.state); },
 
@@ -79,16 +80,6 @@ export const coreActions: Pick<AppActions,
         App.recordAction("api.exportPNG();");
     },
 
-    deselect() {
-        App.state.selection.active = false;
-        App.state.selection.mask = null;
-        App.state.selection.ctx = null;
-        App.state.selection.layerId = null;
-        App.state.selection.outline = null;
-        App.recordAction("api.selectNone();");
-        App.render();
-    },
-
     setZoom(level: string | number) {
         const z = Math.max(0.01, Math.min(20, typeof level === 'string' ? parseFloat(level) : level));
         App.state.zoom = z;
@@ -115,65 +106,9 @@ export const coreActions: Pick<AppActions,
         App.render();
         App.popup!.setHtml(`
             <h3>Base64 Export</h3>
-            <textarea rows="10">${data}</textarea>
-            <button onclick="App.popup.close()">Close</button>
+            <textarea class="ui-textarea" rows="10">${data}</textarea>
+            <div class="popup-actions"><button class="btn cancel-btn" onclick="App.popup.close()">Close</button></div>
         `);
         App.popup!.show();
-    },
-
-    deleteSelection() {
-        const sel = App.state.selection;
-        if (!sel.active || !sel.mask) return;
-        const l = App.utils.getActive();
-        if (!l || !l.visible || l.id !== sel.layerId) return;
-        if (l.type === 'text') { alert('Rasterize text layer to delete selection.'); return; }
-        App.actions.saveState();
-        l.ctx.save();
-        l.ctx.globalCompositeOperation = 'destination-out';
-        l.ctx.drawImage(sel.mask, 0, 0);
-        l.ctx.restore();
-        sel.outline = null;
-        App.emit('layer:content');
-    },
-
-    updateSelectionOutline() {
-        const sel = App.state.selection;
-        if (!sel.active || !sel.mask) return;
-        const l = App.state.layers.find(x => x.id === sel.layerId);
-        if (!l) return;
-        const w = sel.mask.width;
-        const h = sel.mask.height;
-        const outlineCanvas = document.createElement('canvas');
-        outlineCanvas.width = w;
-        outlineCanvas.height = h;
-        const oCtx = outlineCanvas.getContext('2d')!;
-        const maskCtx = sel.mask.getContext('2d')!;
-        const imgData = maskCtx.getImageData(0, 0, w, h);
-        const src = imgData.data;
-        const dstImgData = oCtx.createImageData(w, h);
-        const dst = dstImgData.data;
-        const threshold = 128;
-        const isSelected = (x: number, y: number): boolean => {
-            if (x < 0 || x >= w || y < 0 || y >= h) return false;
-            return src[((y * w) + x) * 4 + 3] >= threshold;
-        };
-
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                if (isSelected(x, y)) {
-                    const isEdge = !isSelected(x - 1, y) || !isSelected(x + 1, y) || !isSelected(x, y - 1) || !isSelected(x, y + 1);
-                    if (isEdge) {
-                        const idx = (y * w + x) * 4;
-                        dst[idx] = 255;
-                        dst[idx + 1] = 255;
-                        dst[idx + 2] = 255;
-                        dst[idx + 3] = 255;
-                    }
-                }
-            }
-        }
-
-        oCtx.putImageData(dstImgData, 0, 0);
-        sel.outline = outlineCanvas;
     }
 };

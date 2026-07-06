@@ -1,7 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 interface GradientStop {
     id: string;
@@ -30,17 +30,27 @@ export const GradientGeneratorWorkspace = {
         ];
         let selectedStopId = 'stop_start';
 
-        let previewPattern: 'linear' | 'wave' | 'radial' | 'concentric' = 'linear';
+        let previewPattern: 'linear' | 'wave' | 'radial' | 'concentric' | 'diamond' | 'square' | 'angular' | 'spiral' = 'linear';
+        let strictSpan = false;
         let exportFormat: 'json' | 'css' | 'svg' = 'json';
         let exportHex = true;
         
         let sampleAlgo: 'dp' | 'equidistant' = 'dp';
         let sampleStopsCount = 10;
 
+        let colormapDistThresh = 50;
+        let colormapMaxReps = 1000;
+        let colormapMinAlpha = 50;
+
+        // Left Panel (Gradient Render) Line State
+        let leftLineStart = { x: Math.round(fullW * 0.15), y: Math.round(fullH * 0.5) };
+        let leftLineEnd = { x: Math.round(fullW * 0.85), y: Math.round(fullH * 0.5) };
+        let leftActiveDragEndpoint: 'start' | 'end' | 'new' | null = null;
+
         // Sampling Line Endpoint State (Canvas coordinates)
-        let lineStart = { x: Math.round(fullW * 0.15), y: Math.round(fullH * 0.5) };
-        let lineEnd = { x: Math.round(fullW * 0.85), y: Math.round(fullH * 0.5) };
-        let activeDragEndpoint: 'start' | 'end' | 'new' | null = null;
+        let rightLineStart = { x: Math.round(fullW * 0.15), y: Math.round(fullH * 0.5) };
+        let rightLineEnd = { x: Math.round(fullW * 0.85), y: Math.round(fullH * 0.5) };
+        let rightActiveDragEndpoint: 'start' | 'end' | 'new' | null = null;
 
         // UI references for interactive updates
         let selectedColorInput: HTMLInputElement;
@@ -52,6 +62,99 @@ export const GradientGeneratorWorkspace = {
         // Extract active layer's image pixel data for sampling
         const fullImgData = layer.ctx.getImageData(0, 0, fullW, fullH);
         const srcData = fullImgData.data;
+
+        const getPixelGradientT = (x: number, y: number): { t: number, outOfBounds: boolean } => {
+            let t = 0;
+            let outOfBounds = false;
+            if (previewPattern === 'linear') {
+                const dx = leftLineEnd.x - leftLineStart.x;
+                const dy = leftLineEnd.y - leftLineStart.y;
+                const lenSq = dx * dx + dy * dy;
+                if (lenSq === 0) {
+                    t = 0;
+                } else {
+                    const dot = (x - leftLineStart.x) * dx + (y - leftLineStart.y) * dy;
+                    t = dot / lenSq;
+                }
+                if (strictSpan && (t < 0 || t > 1)) outOfBounds = true;
+            } else if (previewPattern === 'wave') {
+                const dx = leftLineEnd.x - leftLineStart.x || 1;
+                const dy = leftLineEnd.y - leftLineStart.y || 1;
+                const nx = ((x - leftLineStart.x) / dx) * 2 * Math.PI;
+                const ny = ((y - leftLineStart.y) / dy) * 2 * Math.PI;
+                t = (Math.sin(nx) * Math.cos(ny) + 1) / 2;
+            } else if (previewPattern === 'radial') {
+                const cx = leftLineStart.x;
+                const cy = leftLineStart.y;
+                const maxDist = Math.sqrt((leftLineEnd.x - cx) ** 2 + (leftLineEnd.y - cy) ** 2) || 1;
+                const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+                t = dist / maxDist;
+                if (strictSpan && t > 1) outOfBounds = true;
+            } else if (previewPattern === 'concentric') {
+                const cx = leftLineStart.x;
+                const cy = leftLineStart.y;
+                const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+                const r = Math.sqrt((leftLineEnd.x - cx) ** 2 + (leftLineEnd.y - cy) ** 2) || 20;
+                t = (Math.sin(dist / r * Math.PI * 2) + 1) / 2;
+            } else if (previewPattern === 'diamond') {
+                const cx = leftLineStart.x;
+                const cy = leftLineStart.y;
+                const dx = leftLineEnd.x - leftLineStart.x;
+                const dy = leftLineEnd.y - leftLineStart.y;
+                
+                const angle = Math.atan2(dy, dx);
+                const cosA = Math.cos(-angle);
+                const sinA = Math.sin(-angle);
+                
+                const px = x - cx;
+                const py = y - cy;
+                
+                const rx = px * cosA - py * sinA;
+                const ry = px * sinA + py * cosA;
+                
+                const dist = Math.abs(rx) + Math.abs(ry);
+                const maxDist = Math.sqrt(dx * dx + dy * dy) || 1;
+                t = dist / maxDist;
+                if (strictSpan && t > 1) outOfBounds = true;
+            } else if (previewPattern === 'square') {
+                const cx = leftLineStart.x;
+                const cy = leftLineStart.y;
+                const dx = leftLineEnd.x - leftLineStart.x;
+                const dy = leftLineEnd.y - leftLineStart.y;
+                
+                const angle = Math.atan2(dy, dx);
+                const cosA = Math.cos(-angle);
+                const sinA = Math.sin(-angle);
+                
+                const px = x - cx;
+                const py = y - cy;
+                
+                const rx = px * cosA - py * sinA;
+                const ry = px * sinA + py * cosA;
+                
+                const dist = Math.max(Math.abs(rx), Math.abs(ry));
+                const maxDist = Math.sqrt(dx * dx + dy * dy) || 1;
+                t = dist / maxDist;
+                if (strictSpan && t > 1) outOfBounds = true;
+            } else if (previewPattern === 'angular') {
+                const cx = leftLineStart.x;
+                const cy = leftLineStart.y;
+                const angle = Math.atan2(y - cy, x - cx);
+                const refAngle = Math.atan2(leftLineEnd.y - cy, leftLineEnd.x - cx);
+                let diff = angle - refAngle;
+                if (diff < 0) diff += 2 * Math.PI;
+                t = diff / (2 * Math.PI);
+            } else if (previewPattern === 'spiral') {
+                const cx = leftLineStart.x;
+                const cy = leftLineStart.y;
+                const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+                const angle = Math.atan2(y - cy, x - cx);
+                const refDist = Math.sqrt((leftLineEnd.x - cx) ** 2 + (leftLineEnd.y - cy) ** 2) || 20;
+                t = (dist / refDist + angle / (2 * Math.PI)) % 1;
+                if (t < 0) t += 1;
+            }
+            return { t, outOfBounds };
+        };
 
         // Initialize full-screen workspace layout
         const ws = new App.FullScreenWorkspace({
@@ -66,33 +169,33 @@ export const GradientGeneratorWorkspace = {
                 // Render the selected preview pattern to the active layer
                 for (let y = 0; y < fullH; y++) {
                     for (let x = 0; x < fullW; x++) {
-                        let t = 0;
-                        if (previewPattern === 'linear') {
-                            t = x / (fullW - 1 || 1);
-                        } else if (previewPattern === 'wave') {
-                            const nx = (x / (fullW || 1)) * 4 * Math.PI;
-                            const ny = (y / (fullH || 1)) * 4 * Math.PI;
-                            t = (Math.sin(nx) * Math.cos(ny) + 1) / 2;
-                        } else if (previewPattern === 'radial') {
-                            const cx = fullW / 2;
-                            const cy = fullH / 2;
-                            const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-                            const maxDist = Math.sqrt(cx ** 2 + cy ** 2) || 1;
-                            t = 1 - dist / maxDist;
-                        } else if (previewPattern === 'concentric') {
-                            const cx = fullW / 2;
-                            const cy = fullH / 2;
-                            const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-                            t = (Math.sin(dist / 20) + 1) / 2;
-                        }
+                        const { t, outOfBounds } = getPixelGradientT(x, y);
+
+                        if (outOfBounds) continue;
 
                         const [r, g, b, a] = getGradientColor(t);
-                        const idx = (y * fullW + x) * 4;
+                        if (a <= 0) continue;
 
-                        data[idx] = r;
-                        data[idx + 1] = g;
-                        data[idx + 2] = b;
-                        data[idx + 3] = Math.round(a * 255);
+                        const idx = (y * fullW + x) * 4;
+                        if (a >= 1) {
+                            data[idx] = r;
+                            data[idx + 1] = g;
+                            data[idx + 2] = b;
+                            data[idx + 3] = 255;
+                        } else {
+                            const srcR = data[idx];
+                            const srcG = data[idx + 1];
+                            const srcB = data[idx + 2];
+                            const srcA = data[idx + 3] / 255;
+
+                            const outA = a + srcA * (1 - a);
+                            if (outA > 0) {
+                                data[idx] = Math.round((r * a + srcR * srcA * (1 - a)) / outA);
+                                data[idx + 1] = Math.round((g * a + srcG * srcA * (1 - a)) / outA);
+                                data[idx + 2] = Math.round((b * a + srcB * srcA * (1 - a)) / outA);
+                                data[idx + 3] = Math.round(outA * 255);
+                            }
+                        }
                     }
                 }
 
@@ -407,16 +510,15 @@ export const GradientGeneratorWorkspace = {
             ctx.restore();
         };
 
-        // Sampling Line Drawing Overlay
-        rightViewport.onDrawOverlay = (ctx) => {
+        const drawOverlayLine = (viewport: any, start: {x: number, y: number}, end: {x: number, y: number}) => {
+            const ctx = viewport.overlayCtx;
             ctx.save();
             
-            const pStart = rightViewport.canvasToOverlay(lineStart.x, lineStart.y);
-            const pEnd = rightViewport.canvasToOverlay(lineEnd.x, lineEnd.y);
+            const pStart = viewport.canvasToOverlay(start.x, start.y);
+            const pEnd = viewport.canvasToOverlay(end.x, end.y);
 
-            // Draw line connecting the endpoints
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1.5;
             ctx.shadowBlur = 4;
             ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
             ctx.beginPath();
@@ -424,7 +526,7 @@ export const GradientGeneratorWorkspace = {
             ctx.lineTo(pEnd.x, pEnd.y);
             ctx.stroke();
 
-            ctx.strokeStyle = '#007acc';
+            ctx.strokeStyle = 'rgba(0, 122, 204, 0.5)';
             ctx.lineWidth = 1.5;
             ctx.setLineDash([4, 4]);
             ctx.beginPath();
@@ -433,26 +535,47 @@ export const GradientGeneratorWorkspace = {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Draw handles at endpoints
-            const r = 8;
             ctx.fillStyle = '#007acc';
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 1.5;
             ctx.shadowBlur = 0;
 
-            // Start handle
-            ctx.beginPath();
-            ctx.arc(pStart.x, pStart.y, r, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.stroke();
+            const dx = pEnd.x - pStart.x;
+            const dy = pEnd.y - pStart.y;
+            const angle = Math.atan2(dy, dx);
 
-            // End handle
-            ctx.beginPath();
-            ctx.arc(pEnd.x, pEnd.y, r, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.stroke();
+            const drawTriangle = (x: number, y: number, ang: number, isStart: boolean) => {
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(ang);
+                ctx.beginPath();
+                if (isStart) {
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(12, 6);
+                    ctx.lineTo(12, -6);
+                } else {
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(-12, 6);
+                    ctx.lineTo(-12, -6);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            };
+
+            drawTriangle(pStart.x, pStart.y, angle, true);
+            drawTriangle(pEnd.x, pEnd.y, angle, false);
 
             ctx.restore();
+        };
+
+        leftViewport.onDrawOverlay = () => {
+            drawOverlayLine(leftViewport, leftLineStart, leftLineEnd);
+        };
+
+        rightViewport.onDrawOverlay = () => {
+            drawOverlayLine(rightViewport, rightLineStart, rightLineEnd);
         };
 
         // --- Visual Rendering Processes ---
@@ -464,35 +587,33 @@ export const GradientGeneratorWorkspace = {
 
             for (let y = 0; y < fullH; y++) {
                 for (let x = 0; x < fullW; x++) {
-                    let t = 0;
-                    if (previewPattern === 'linear') {
-                        t = x / (fullW - 1 || 1);
-                    } else if (previewPattern === 'wave') {
-                        const nx = (x / (fullW || 1)) * 4 * Math.PI;
-                        const ny = (y / (fullH || 1)) * 4 * Math.PI;
-                        t = (Math.sin(nx) * Math.cos(ny) + 1) / 2;
-                    } else if (previewPattern === 'radial') {
-                        const cx = fullW / 2;
-                        const cy = fullH / 2;
-                        const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-                        const maxDist = Math.sqrt(cx ** 2 + cy ** 2) || 1;
-                        t = 1 - dist / maxDist;
-                    } else if (previewPattern === 'concentric') {
-                        const cx = fullW / 2;
-                        const cy = fullH / 2;
-                        const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-                        t = (Math.sin(dist / 20) + 1) / 2;
-                    }
-
-                    const [r, g, b, a] = getGradientColor(t);
+                    const { t, outOfBounds } = getPixelGradientT(x, y);
                     const idx = (y * fullW + x) * 4;
+
+                    let finalR = srcData[idx];
+                    let finalG = srcData[idx + 1];
+                    let finalB = srcData[idx + 2];
+                    let finalA = srcData[idx + 3] / 255;
+
+                    if (!outOfBounds) {
+                        const [r, g, b, a] = getGradientColor(t);
+                        if (a > 0) {
+                            const outA = a + finalA * (1 - a);
+                            if (outA > 0) {
+                                finalR = Math.round((r * a + finalR * finalA * (1 - a)) / outA);
+                                finalG = Math.round((g * a + finalG * finalA * (1 - a)) / outA);
+                                finalB = Math.round((b * a + finalB * finalA * (1 - a)) / outA);
+                                finalA = outA;
+                            }
+                        }
+                    }
 
                     const isChecker = (Math.floor(x / 8) + Math.floor(y / 8)) % 2 === 0;
                     const bgVal = isChecker ? 28 : 20;
 
-                    data[idx] = Math.round(r * a + bgVal * (1 - a));
-                    data[idx + 1] = Math.round(g * a + bgVal * (1 - a));
-                    data[idx + 2] = Math.round(b * a + bgVal * (1 - a));
+                    data[idx] = Math.round(finalR * finalA + bgVal * (1 - finalA));
+                    data[idx + 1] = Math.round(finalG * finalA + bgVal * (1 - finalA));
+                    data[idx + 2] = Math.round(finalB * finalA + bgVal * (1 - finalA));
                     data[idx + 3] = 255;
                 }
             }
@@ -701,53 +822,98 @@ export const GradientGeneratorWorkspace = {
             handleAddStopAtClick(e, gradientBarCanvas);
         });
 
-        // --- Interaction Handlers on Right Panel Line (Image Sampling Viewport) ---
-        rightViewport.onMouseDown = (e) => {
-            const dxStart = e.x - lineStart.x;
-            const dyStart = e.y - lineStart.y;
+        // --- Interaction Handlers on Left Panel Line (Gradient Render Viewport) ---
+        leftViewport.onMouseDown = (e) => {
+            const dxStart = e.x - leftLineStart.x;
+            const dyStart = e.y - leftLineStart.y;
             const distStart = Math.sqrt(dxStart * dxStart + dyStart * dyStart);
 
-            const dxEnd = e.x - lineEnd.x;
-            const dyEnd = e.y - lineEnd.y;
+            const dxEnd = e.x - leftLineEnd.x;
+            const dyEnd = e.y - leftLineEnd.y;
             const distEnd = Math.sqrt(dxEnd * dxEnd + dyEnd * dyEnd);
 
-            const thresh = 15 / rightViewport.zoom;
+            // Larger hit area (40px) to comfortably grab the arrow heads
+            const thresh = 40 / leftViewport.zoom;
 
             if (distStart < thresh) {
-                activeDragEndpoint = 'start';
+                leftActiveDragEndpoint = 'start';
             } else if (distEnd < thresh) {
-                activeDragEndpoint = 'end';
+                leftActiveDragEndpoint = 'end';
             } else {
-                activeDragEndpoint = 'new';
-                lineStart = { x: e.x, y: e.y };
-                lineEnd = { x: e.x, y: e.y };
+                leftActiveDragEndpoint = 'new';
+                leftLineStart = { x: e.x, y: e.y };
+                leftLineEnd = { x: e.x, y: e.y };
+            }
+            leftViewport.drawOverlay();
+            renderPreviewPattern();
+        };
+
+        leftViewport.onMouseMove = (e) => {
+            if (!leftActiveDragEndpoint) return;
+            if (leftActiveDragEndpoint === 'start') {
+                leftLineStart = { x: e.x, y: e.y };
+            } else if (leftActiveDragEndpoint === 'end') {
+                leftLineEnd = { x: e.x, y: e.y };
+            } else if (leftActiveDragEndpoint === 'new') {
+                leftLineEnd = { x: e.x, y: e.y };
+            }
+            leftViewport.drawOverlay();
+            renderPreviewPattern();
+        };
+
+        leftViewport.onMouseUp = () => {
+            leftActiveDragEndpoint = null;
+            leftViewport.drawOverlay();
+            renderPreviewPattern();
+        };
+
+        // --- Interaction Handlers on Right Panel Line (Image Sampling Viewport) ---
+        rightViewport.onMouseDown = (e) => {
+            const dxStart = e.x - rightLineStart.x;
+            const dyStart = e.y - rightLineStart.y;
+            const distStart = Math.sqrt(dxStart * dxStart + dyStart * dyStart);
+
+            const dxEnd = e.x - rightLineEnd.x;
+            const dyEnd = e.y - rightLineEnd.y;
+            const distEnd = Math.sqrt(dxEnd * dxEnd + dyEnd * dyEnd);
+
+            const thresh = 40 / rightViewport.zoom;
+
+            if (distStart < thresh) {
+                rightActiveDragEndpoint = 'start';
+            } else if (distEnd < thresh) {
+                rightActiveDragEndpoint = 'end';
+            } else {
+                rightActiveDragEndpoint = 'new';
+                rightLineStart = { x: e.x, y: e.y };
+                rightLineEnd = { x: e.x, y: e.y };
             }
             rightViewport.drawOverlay();
         };
 
         rightViewport.onMouseMove = (e) => {
-            if (!activeDragEndpoint) return;
-            if (activeDragEndpoint === 'start') {
-                lineStart = { x: e.x, y: e.y };
-            } else if (activeDragEndpoint === 'end') {
-                lineEnd = { x: e.x, y: e.y };
-            } else if (activeDragEndpoint === 'new') {
-                lineEnd = { x: e.x, y: e.y };
+            if (!rightActiveDragEndpoint) return;
+            if (rightActiveDragEndpoint === 'start') {
+                rightLineStart = { x: e.x, y: e.y };
+            } else if (rightActiveDragEndpoint === 'end') {
+                rightLineEnd = { x: e.x, y: e.y };
+            } else if (rightActiveDragEndpoint === 'new') {
+                rightLineEnd = { x: e.x, y: e.y };
             }
             rightViewport.drawOverlay();
         };
 
         rightViewport.onMouseUp = () => {
-            activeDragEndpoint = null;
+            rightActiveDragEndpoint = null;
             rightViewport.drawOverlay();
         };
 
         // --- Profiles Sampling & Algorithm Optimization (Ported from palette.html) ---
         const getProfileFromImage = (): Array<{ t: number; color: [number, number, number] }> => {
-            const x1 = lineStart.x;
-            const y1 = lineStart.y;
-            const x2 = lineEnd.x;
-            const y2 = lineEnd.y;
+            const x1 = rightLineStart.x;
+            const y1 = rightLineStart.y;
+            const x2 = rightLineEnd.x;
+            const y2 = rightLineEnd.y;
             const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
             if (dist < 2) return [];
 
@@ -893,6 +1059,187 @@ export const GradientGeneratorWorkspace = {
             updateExportText();
         };
 
+        const sampleColorsFromImage = (data: Uint8ClampedArray, maxRepresentatives = 100, initialDistThresh = 50, minAlpha = 50): number[][] => {
+            const step = Math.max(1, Math.floor(data.length / 4 / 3000));
+            const reps: number[][] = [];
+            let distThresh = initialDistThresh;
+
+            for (let attempt = 0; attempt < 3; attempt++) {
+                reps.length = 0;
+                for (let i = 0; i < data.length; i += step * 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const a = data[i + 3];
+                    if (a < minAlpha) continue;
+
+                    let distinct = true;
+                    for (const rep of reps) {
+                        const dist = Math.sqrt((r - rep[0])**2 + (g - rep[1])**2 + (b - rep[2])**2);
+                        if (dist < distThresh) {
+                            distinct = false;
+                            break;
+                        }
+                    }
+                    if (distinct) {
+                        reps.push([r, g, b]);
+                        if (reps.length >= maxRepresentatives) break;
+                    }
+                }
+                if (reps.length >= 20 || distThresh <= 10) break;
+                distThresh -= 10;
+            }
+            return reps;
+        };
+
+        interface MSTEdge {
+            u: number;
+            v: number;
+            weight: number;
+        }
+
+        const buildMST = (nodes: number[][]): MSTEdge[] => {
+            const edges: MSTEdge[] = [];
+            const n = nodes.length;
+
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const d = Math.sqrt(
+                        (nodes[i][0] - nodes[j][0])**2 +
+                        (nodes[i][1] - nodes[j][1])**2 +
+                        (nodes[i][2] - nodes[j][2])**2
+                    );
+                    edges.push({ u: i, v: j, weight: d });
+                }
+            }
+
+            edges.sort((a, b) => a.weight - b.weight);
+
+            const parent = Array.from({ length: n }, (_, i) => i);
+            const find = (i: number): number => {
+                if (parent[i] === i) return i;
+                return parent[i] = find(parent[i]);
+            };
+            const union = (i: number, j: number): boolean => {
+                const rootI = find(i);
+                const rootJ = find(j);
+                if (rootI !== rootJ) {
+                    parent[rootI] = rootJ;
+                    return true;
+                }
+                return false;
+            };
+
+            const mstEdges: MSTEdge[] = [];
+            for (const edge of edges) {
+                if (union(edge.u, edge.v)) {
+                    mstEdges.push(edge);
+                    if (mstEdges.length === n - 1) break;
+                }
+            }
+            return mstEdges;
+        };
+
+        const findMSTDiameter = (n: number, mstEdges: MSTEdge[]): number[] => {
+            const adj: Array<Array<{ to: number; weight: number }>> = Array.from({ length: n }, () => []);
+            for (const edge of mstEdges) {
+                adj[edge.u].push({ to: edge.v, weight: edge.weight });
+                adj[edge.v].push({ to: edge.u, weight: edge.weight });
+            }
+
+            const getFarthestNode = (start: number) => {
+                const dist = Array(n).fill(Infinity);
+                const parentNode = Array(n).fill(-1);
+                dist[start] = 0;
+
+                const queue: number[] = [start];
+                let maxDist = 0;
+                let farthestNode = start;
+
+                while (queue.length > 0) {
+                    const u = queue.shift()!;
+                    for (const edge of adj[u]) {
+                        if (dist[edge.to] === Infinity) {
+                            dist[edge.to] = dist[u] + edge.weight;
+                            parentNode[edge.to] = u;
+                            queue.push(edge.to);
+
+                            if (dist[edge.to] > maxDist) {
+                                maxDist = dist[edge.to];
+                                farthestNode = edge.to;
+                            }
+                        }
+                    }
+                }
+                return { farthestNode, parentNode, maxDist };
+            };
+
+            const pass1 = getFarthestNode(0);
+            const pass2 = getFarthestNode(pass1.farthestNode);
+
+            const path: number[] = [];
+            let curr = pass2.farthestNode;
+            while (curr !== -1) {
+                path.push(curr);
+                curr = pass2.parentNode[curr];
+            }
+            return path;
+        };
+
+        const extractGradientFromWholeImage = () => {
+            const reps = sampleColorsFromImage(srcData, colormapMaxReps, colormapDistThresh, colormapMinAlpha);
+            if (reps.length < 2) {
+                return alert('Not enough colors found in the image. Try reducing the Color Dist Thresh or Min Alpha Threshold.');
+            }
+
+            const mst = buildMST(reps);
+            const pathIndices = findMSTDiameter(reps.length, mst);
+
+            if (pathIndices.length < 2) {
+                return alert('Could not extract a valid colormap path.');
+            }
+
+            const profile: Array<{ t: number; color: [number, number, number] }> = [];
+            const segmentLengths: number[] = [];
+            let totalLength = 0;
+
+            for (let i = 0; i < pathIndices.length - 1; i++) {
+                const u = reps[pathIndices[i]];
+                const v = reps[pathIndices[i + 1]];
+                const dist = Math.sqrt((u[0] - v[0])**2 + (u[1] - v[1])**2 + (u[2] - v[2])**2);
+                segmentLengths.push(dist);
+                totalLength += dist;
+            }
+
+            let currentLen = 0;
+            profile.push({ t: 0, color: [reps[pathIndices[0]][0], reps[pathIndices[0]][1], reps[pathIndices[0]][2]] });
+            for (let i = 0; i < segmentLengths.length; i++) {
+                currentLen += segmentLengths[i];
+                const t = totalLength === 0 ? (i + 1) / segmentLengths.length : currentLen / totalLength;
+                const idx = pathIndices[i + 1];
+                profile.push({ t, color: [reps[idx][0], reps[idx][1], reps[idx][2]] });
+            }
+
+            stops = simplifyProfileDP(profile, sampleStopsCount);
+
+            if (stops.length < 2) {
+                stops = [
+                    { id: 'stop_start', t: 0.0, color: [0, 0, 0], opacity: 1.0 },
+                    { id: 'stop_end', t: 1.0, color: [255, 255, 255], opacity: 1.0 }
+                ];
+            }
+
+            stops.sort((a, b) => a.t - b.t);
+            selectedStopId = stops[0].id;
+
+            renderStopMarkers();
+            renderGradientBar();
+            renderPreviewPattern();
+            drawChannelsPlot();
+            updateStopUIFields();
+            updateExportText();
+        };
+
         // --- Sidebar UI Controllers ---
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Pattern & Preview Settings'));
 
@@ -902,11 +1249,24 @@ export const GradientGeneratorWorkspace = {
                 { value: 'linear', text: 'Linear' },
                 { value: 'wave', text: 'Wave Pattern' },
                 { value: 'radial', text: 'Radial Glow' },
-                { value: 'concentric', text: 'Concentric' }
+                { value: 'concentric', text: 'Concentric' },
+                { value: 'diamond', text: 'Diamond' },
+                { value: 'square', text: 'Square / Box' },
+                { value: 'angular', text: 'Angular / Conic' },
+                { value: 'spiral', text: 'Spiral' }
             ],
             value: previewPattern,
             onChange: (v) => {
                 previewPattern = v as any;
+                renderPreviewPattern();
+            }
+        }));
+
+        ws.sidebar.appendChild(UI.createCheckbox({
+            label: 'Strict Span (Start to End only)',
+            value: strictSpan,
+            onChange: (v) => {
+                strictSpan = v;
                 renderPreviewPattern();
             }
         }));
@@ -1048,11 +1408,30 @@ export const GradientGeneratorWorkspace = {
         }));
 
         ws.sidebar.appendChild(UI.createButton({
-            label: 'Get Gradient From Image',
+            label: 'Extract gradient along line',
             className: 'btn',
             style: 'width: 100%; margin-top: 5px; font-weight: bold; background-color: #28a745;',
             onClick: () => {
                 sampleGradientFromImage();
+            }
+        }));
+
+        ws.sidebar.appendChild(UI.createSliderRow({
+            label: 'Color Dist Thresh', min: 5, max: 150, step: 1, value: colormapDistThresh,
+            onInput: (v) => { colormapDistThresh = parseInt(v); }
+        }));
+
+        ws.sidebar.appendChild(UI.createSliderRow({
+            label: 'Min Alpha Threshold', min: 0, max: 255, step: 5, value: colormapMinAlpha,
+            onInput: (v) => { colormapMinAlpha = parseInt(v); }
+        }));
+
+        ws.sidebar.appendChild(UI.createButton({
+            label: 'Extract colormap from image',
+            className: 'btn',
+            style: 'width: 100%; margin-top: 5px; font-weight: bold; background-color: #17a2b8;',
+            onClick: () => {
+                extractGradientFromWholeImage();
             }
         }));
 
@@ -1148,6 +1527,8 @@ export const GradientGeneratorWorkspace = {
             updateExportText();
 
             // Initial center draw overlay
+            leftViewport.onDraw!();
+            leftViewport.drawOverlay();
             rightViewport.onDraw!();
             rightViewport.drawOverlay();
         }, 60);
@@ -1165,7 +1546,7 @@ export const GradientGeneratorWorkspace = {
             .gradient-stop-marker { position: absolute; top: 4px; width: 12px; height: 12px; transform: translateX(-50%) rotate(45deg); cursor: pointer; border: 1.5px solid #aaa; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); transition: border-color 0.1s, transform 0.1s; }
             .gradient-stop-marker:hover { border-color: #fff; transform: translateX(-50%) rotate(45deg) scale(1.1); }
             .gradient-stop-marker.selected { border-color: #007acc; box-shadow: 0 0 4px #007acc; transform: translateX(-50%) rotate(45deg) scale(1.2); z-index: 10; }
-            .gradient-text-export { background: #121212; border: 1px solid #333; color: #00ff66; font-family: monospace; font-size: 11px; width: 100%; height: 110px; resize: none; padding: 6px; box-sizing: border-box; border-radius: 4px; margin-top: 5px; }
+            .gradient-text-export { background: #121212; flex: none; border: 1px solid #333; color: #00ff66; font-family: monospace; font-size: 11px; width: 100%; height: 110px; resize: none; padding: 6px; box-sizing: border-box; border-radius: 4px; margin-top: 5px; }
         `;
         document.head.appendChild(style);
     }
@@ -1177,13 +1558,14 @@ if (typeof window !== 'undefined') {
 
 Filters.register('gradient-generator', {
     name: 'Interactive Gradient Generator',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Generate',
         label: 'Gradient...',
-        order: 5
+        order: 6
     },
-    apply(l: Layer) {
+    apply(ctx: FilterContext) {
+        const l = ctx.layer;
         GradientGeneratorWorkspace.open();
     }
 });

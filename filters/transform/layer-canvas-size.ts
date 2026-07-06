@@ -1,18 +1,20 @@
 import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 Filters.register('layer-canvas-size', {
     name: 'Layer Canvas Size',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Layer',
         label: 'Layer Size...',
         order: 3
     },
 
-    apply(l: Layer, state: any) {
+    apply(context: FilterContext) {
+        const l = context.layer;
+        const state = context.values;
         const origW = state.origW !== undefined ? state.origW : l.width;
         const origH = state.origH !== undefined ? state.origH : l.height;
 

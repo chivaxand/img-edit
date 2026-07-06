@@ -1,7 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 // Binary Heap Priority Queue for Meyer's Flooding algorithm
 class PriorityQueue {
@@ -322,17 +322,17 @@ export const WatershedFilter = {
         // Sidebar Painting tool buttons
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Drawing Tools'));
 
-        const objBtn = UI.createNode('button', { className: 'ws-tool-btn obj-tool active' },
+        const objBtn = UI.createNode('button', { className: 'fs-tool-btn obj-tool active' },
             UI.createNode('span', { style: 'display:inline-block; width:10px; height:10px; background-color:#e91e63; border-radius:50%' }),
             'Object'
         ) as HTMLButtonElement;
 
-        const bgBtn = UI.createNode('button', { className: 'ws-tool-btn bg-tool' },
+        const bgBtn = UI.createNode('button', { className: 'fs-tool-btn bg-tool' },
             UI.createNode('span', { style: 'display:inline-block; width:10px; height:10px; background-color:#2196f3; border-radius:50%' }),
             'Background'
         ) as HTMLButtonElement;
 
-        const eraseBtn = UI.createNode('button', { className: 'ws-tool-btn erase-tool' },
+        const eraseBtn = UI.createNode('button', { className: 'fs-tool-btn erase-tool' },
             UI.createNode('span', { style: 'display:inline-block; width:10px; height:10px; background-color:#fff; border: 1px solid #666; border-radius:50%' }),
             'Erase'
         ) as HTMLButtonElement;
@@ -347,7 +347,7 @@ export const WatershedFilter = {
         bgBtn.onclick = () => { brushType = 'bg'; updateToolButtons(); };
         eraseBtn.onclick = () => { brushType = 'erase'; updateToolButtons(); };
 
-        const toolGroup = UI.createNode('div', { className: 'ws-tool-group' }, objBtn, bgBtn, eraseBtn);
+        const toolGroup = UI.createNode('div', { className: 'fs-tool-group tri' }, objBtn, bgBtn, eraseBtn);
         ws.sidebar.appendChild(toolGroup);
 
         ws.sidebar.appendChild(UI.createSliderRow({
@@ -964,13 +964,9 @@ export const WatershedFilter = {
             .ws-seed-row { display: flex; align-items: center; padding: 8px 10px; background: #1e1e1e; border: 1px solid #333; border-radius: 6px; transition: all 0.2s ease; }
             .ws-seed-color { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.2); }
             .ws-seed-info { flex-grow: 1; font-weight: bold; font-size: 12px; color: #ccc; }
-            .ws-tool-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-            .ws-tool-btn { background-color: #121212; border: 1px solid #333; color: #ccc; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s ease; font-weight: bold; }
-            .ws-tool-btn:hover { background-color: #2a2a2a; border-color: #007acc; }
-            .ws-tool-btn.active { border-color: #007acc; background-color: rgba(0, 122, 204, 0.15); color: #fff; }
-            .ws-tool-btn.obj-tool.active { border-color: #e91e63; background-color: rgba(233, 30, 99, 0.15); }
-            .ws-tool-btn.bg-tool.active { border-color: #2196f3; background-color: rgba(33, 150, 243, 0.15); }
-            .ws-tool-btn.erase-tool.active { border-color: #9e9e9e; background-color: rgba(158, 158, 158, 0.15); }
+            .fs-tool-btn.obj-tool.active { border-color: #e91e63; background-color: rgba(233, 30, 99, 0.15); }
+            .fs-tool-btn.bg-tool.active { border-color: #2196f3; background-color: rgba(33, 150, 243, 0.15); }
+            .fs-tool-btn.erase-tool.active { border-color: #9e9e9e; background-color: rgba(158, 158, 158, 0.15); }
         `;
         document.head.appendChild(style);
     }
@@ -1011,13 +1007,14 @@ function convertRgbToLab(data: Uint8ClampedArray, w: number, h: number): Float32
 
 Filters.register('watershed', {
     name: 'Watershed Segmentation',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Filter/Segmentation',
         label: 'Watershed...',
         order: 2
     },
-    apply(l: Layer) {
+    apply(ctx: FilterContext) {
+        const l = ctx.layer;
         WatershedFilter.open();
     }
 });

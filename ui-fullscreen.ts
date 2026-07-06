@@ -54,6 +54,7 @@ export class InteractiveViewport {
 
     private globalMouseMoveHandler!: (e: MouseEvent) => void;
     private globalMouseUpHandler!: (e: MouseEvent) => void;
+    private resizeObserver!: ResizeObserver;
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
@@ -73,6 +74,14 @@ export class InteractiveViewport {
             canvas.parentElement.appendChild(this.overlayCanvas);
         }
         this.overlayCtx = this.overlayCanvas.getContext('2d')!;
+
+        this.resizeObserver = new ResizeObserver(() => {
+            this.applyTransform();
+            if (this.onDraw) this.onDraw();
+        });
+        if (canvas.parentElement) {
+            this.resizeObserver.observe(canvas.parentElement);
+        }
 
         this.setupEvents();
         this.applyTransform();
@@ -429,6 +438,9 @@ export class InteractiveViewport {
     destroy() {
         window.removeEventListener('mousemove', this.globalMouseMoveHandler);
         window.removeEventListener('mouseup', this.globalMouseUpHandler);
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
         if (this.overlayCanvas && this.overlayCanvas.parentNode) {
             this.overlayCanvas.parentNode.removeChild(this.overlayCanvas);
         }
@@ -525,7 +537,7 @@ export class FullScreenWorkspace {
             .fs-workspace-title { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; color: #007acc; text-transform: uppercase; }
             .fs-workspace-header-actions { display: flex; gap: 10px; }
             .fs-workspace-body { flex-grow: 1; display: flex; overflow: hidden; }
-            .fs-workspace-sidebar { width: 320px; background: #1e1e1e; border-right: 1px solid #333333; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; overflow-y: auto; flex-shrink: 0; gap: 10px; }
+            .fs-workspace-sidebar { width: 340px; background: #1e1e1e; border-right: 1px solid #333333; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; overflow-y: auto; flex-shrink: 0; gap: 10px; }
             .fs-workspace-content { flex-grow: 1; background: #141414; overflow: hidden; display: flex; position: relative; box-sizing: border-box; }
             .fs-workspace-section-title { font-size: 12px; font-weight: bold; text-transform: uppercase; color: #888; border-bottom: 1px solid #2d2d2d; padding-bottom: 6px; margin-bottom: 5px; margin-top: 10px; letter-spacing: 0.5px; }
             
@@ -534,6 +546,11 @@ export class FullScreenWorkspace {
             .fs-split-panel-header { display: flex; justify-content: space-between; align-items: center; background: #252526; padding: 8px 12px; border-bottom: 1px solid #333; font-weight: bold; font-size: 11px; color: #aaa; text-transform: uppercase; }
             .fs-split-canvas-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 10px; background-image: linear-gradient(45deg, #181818 25%, transparent 25%), linear-gradient(-45deg, #181818 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181818 75%), linear-gradient(-45deg, transparent 75%, #181818 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px; position: relative; }
             .fs-split-canvas { box-shadow: 0 4px 12px rgba(0,0,0,0.5); object-fit: contain; image-rendering: pixelated; background: transparent; cursor: crosshair; max-width: 100%; max-height: 100%; }
+            .fs-tool-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+            .fs-tool-group.tri { grid-template-columns: 1fr 1fr 1fr; }
+            .fs-tool-btn { background-color: #121212; border: 1px solid #333; color: #ccc; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: background-color 0.2s, border-color 0.2s; font-weight: bold; }
+            .fs-tool-btn:hover { background-color: #2a2a2a; border-color: #007acc; }
+            .fs-tool-btn.active { border-color: #007acc; background-color: rgba(0, 122, 204, 0.15); color: #fff; }
         `;
         document.head.appendChild(style);
     }

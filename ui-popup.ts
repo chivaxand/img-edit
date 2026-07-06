@@ -81,18 +81,11 @@ export class Popup {
             .popup-header { height: 32px; background: #333; cursor: move; flex-shrink: 0; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid #3e3e42; font-weight: 600; color: #fff; user-select: none; }
             .popup-body { padding: 15px; overflow-y: auto; flex: 1; min-height: 0; }
             .popup-wnd h3 { margin: 0 0 15px 0; font-size: 14px; color: #fff; font-weight: 600; border-bottom: 1px solid #3e3e42; padding-bottom: 8px; }
-            .popup-wnd label { display: flex; align-items: center; margin: 10px 0 5px; color: #aaa; font-size: 12px; }
-            .popup-wnd .row { margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
-            .popup-wnd .row label { margin: 0; flex-shrink: 0; min-width: 80px; }
-            .popup-wnd .row > input, .popup-wnd .row > select, .popup-wnd .row > div { flex: 1; width: auto !important; min-width: 0; }
-            .popup-wnd input, .popup-wnd select, .popup-wnd textarea { width: 100%; padding: 5px; box-sizing: border-box; border: 1px solid #3e3e42; border-radius: 2px; color: #fff; background: #3c3c3c; font-family: inherit; font-size: 12px; }
-            .popup-wnd input:focus, .popup-wnd select:focus, .popup-wnd textarea:focus { border-color: #007acc; outline: none; }
-            .popup-wnd input[type="range"] { padding: 0; border: none; background: transparent; height: auto; }
-            .popup-wnd input[type="checkbox"] { width: auto; margin: 0 5px 0 0; }
-            .popup-wnd button { padding: 6px 15px; background: #007acc; color: white; border: none; border-radius: 2px; cursor: pointer; margin: 15px 5px 0 0; font-size: 12px; }
-            .popup-wnd button:hover { opacity: 0.9; }
-            .popup-wnd button.cancel-btn { background: #3e3e42; }
-            .popup-wnd button.cancel-btn:hover { background: #4e4e52; }
+            .popup-wnd .ui-row { margin-bottom: 12px; gap: 10px; }
+            .popup-wnd .ui-row > label { min-width: 85px; font-size: 12px; }
+            .popup-wnd .ui-checkbox-label, .popup-wnd .ui-radio-label { font-size: 12px; margin: 6px 0; }
+            .popup-wnd .ui-input, .popup-wnd .ui-select, .popup-wnd .ui-textarea { padding: 6px; border: 1px solid #3e3e42; }
+            .popup-wnd button.btn { padding: 6px 15px; font-size: 12px; }
             .popup-subtitle { font-size: 12px; font-weight: bold; color: #fff; text-transform: uppercase; margin: 15px 0 10px 0; letter-spacing: 0.5px; }
             .popup-separator { height: 1px; background: #3e3e42; margin: 10px 0; }
             .popup-hint { font-size: 11px; color: #999; margin-bottom: 10px; }

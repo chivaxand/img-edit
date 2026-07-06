@@ -1,3 +1,5 @@
+import { plot, PaletteName } from '~/libs/plot';
+
 export interface UIProps {
     id?: string;
     className?: string;
@@ -47,6 +49,13 @@ interface UISelectOpts<T = any> {
     options: Array<string | number | UISelectOption<T>>;
     value: T;
     onChange: (val: string) => void;
+    [k: string]: any;
+}
+
+interface UIPaletteSelectOpts {
+    label: string | null;
+    value: PaletteName;
+    onChange: (val: PaletteName) => void;
     [k: string]: any;
 }
 
@@ -112,6 +121,7 @@ interface UIInterface {
     createCheckbox(opts: UICheckboxOpts): HTMLLabelElement;
     createHint(text: string, props?: UIProps): HTMLElement;
     createSelectRow<T = any>(opts: UISelectOpts<T>): HTMLElement;
+    createPaletteSelectRow(opts: UIPaletteSelectOpts): HTMLElement;
     createRadioGroup<T = any>(opts: UIRadioOpts<T>): HTMLElement;
     createColorRow(opts: UIColorOpts): HTMLElement;
     createCanvas(opts?: UICanvasOpts): { element: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null };
@@ -144,18 +154,20 @@ export const UI: UIInterface = {
     },
     
     createRow(label: string | null, content: HTMLElement): HTMLElement {
-        return UI.createNode('div', { className: 'row' }, 
+        return UI.createNode('div', { className: 'ui-row' }, 
             label ? UI.createNode('label', {}, label) : null, 
             content
         );
     },
     
     createInput(type: string, props: UIProps, onInput: (target: HTMLInputElement) => void): HTMLInputElement {
-        return UI.createNode('input', { type, ...props, on: { [type === 'checkbox' ? 'change' : 'input']: (e: Event) => onInput(e.target as HTMLInputElement) } });
+        const className = type === 'checkbox' ? 'ui-checkbox' : type === 'radio' ? 'ui-radio' : type === 'range' ? 'ui-range' : type === 'color' ? 'ui-color' : 'ui-input';
+        const combinedClass = props.className ? `${className} ${props.className}` : className;
+        return UI.createNode('input', { type, ...props, className: combinedClass, on: { [type === 'checkbox' || type === 'radio' ? 'change' : 'input']: (e: Event) => onInput(e.target as HTMLInputElement) } });
     },
     
     createButton(opts: UIButtonOpts): HTMLButtonElement {
-        const { label, onClick, className = '', style, ...rest } = opts;
+        const { label, onClick, className = 'btn', style, ...rest } = opts;
         return this.createNode('button', { className, style, on: { click: onClick as EventListener }, ...rest }, label);
     },
     
@@ -164,7 +176,7 @@ export const UI: UIInterface = {
         const formatValue = (v: any) => formatter ? formatter(v) : String(v);
         const disp = UI.createNode('span', { style: { width:'55px', textAlign:'right', fontSize:'10px', fontFamily:'monospace' } }, formatValue(value));
         const inp = UI.createNode('input', { 
-            type: 'range', min, max, step: s, value: value, 
+            type: 'range', className: 'ui-range', min, max, step: s, value: value, 
             on: { 
                 input: (e: Event) => { 
                     const target = e.target as HTMLInputElement;
@@ -191,9 +203,9 @@ export const UI: UIInterface = {
     
     createCheckbox({ label, value, onChange, props = {} }: UICheckboxOpts): HTMLLabelElement {
         const input = this.createInput('checkbox', { checked: value, ...props }, t => onChange(t.checked));
-        return this.createNode('label', { style: 'display:flex; align-items:center; cursor:pointer; margin:5px 0; color:#aaa;' },
+        return this.createNode('label', { className: 'ui-checkbox-label' },
             input,
-            this.createNode('span', { style: 'margin-left:5px' }, label)
+            this.createNode('span', {}, label)
         );
     },
 
@@ -205,7 +217,7 @@ export const UI: UIInterface = {
     },
     
     createSelectRow<T = any>({ label, options, value, onChange }: UISelectOpts<T>): HTMLElement {
-        const sel = this.createNode('select', { on: { change: (e: Event) => onChange((e.target as HTMLSelectElement).value) } });
+        const sel = this.createNode('select', { className: 'ui-select', on: { change: (e: Event) => onChange((e.target as HTMLSelectElement).value) } });
         options.forEach((o: any) => {
             const isObj = o && typeof o === 'object';
             const v = isObj ? o.value : o;
@@ -213,6 +225,26 @@ export const UI: UIInterface = {
             sel.appendChild(this.createNode('option', { value: String(v), textContent: String(t), selected: String(v) === String(value) }));
         });
         return this.createRow(label, sel);
+    },
+
+    createPaletteSelectRow({ label, value, onChange }: UIPaletteSelectOpts): HTMLElement {
+        const sel = this.createNode('select', {
+            className: 'ui-select',
+            on: { change: (e: Event) => {
+                const val = (e.target as HTMLSelectElement).value as PaletteName;
+                plot.drawPalettePreview(canvas, val);
+                onChange(val);
+            }}
+        });
+        Object.keys(plot.palettes).forEach(p => {
+            sel.appendChild(this.createNode('option', { value: p, textContent: p.charAt(0).toUpperCase() + p.slice(1), selected: p === value }));
+        });
+        const canvas = this.createNode('canvas', {
+            width: 80, height: 18,
+            style: 'border: 1px solid #555; border-radius: 2px; margin-left: 8px; flex-shrink: 0;'
+        });
+        plot.drawPalettePreview(canvas, value);
+        return this.createRow(label, this.createNode('div', { style: 'display: flex; align-items: center; width: 100%;' }, sel, canvas));
     },
     
     createRadioGroup<T = any>({ label, options, value, name, layout = 'column', onChange }: UIRadioOpts<T>): HTMLElement {
@@ -224,14 +256,9 @@ export const UI: UIInterface = {
             const isObj = opt && typeof opt === 'object';
             const val = isObj ? opt.value : opt;
             const text = isObj ? (opt.label || opt.text) : opt;
-            const radio = UI.createInput('radio', {
-                name: uniqueName,
-                value: String(val),
-                checked: val === value,
-                style: 'width:auto; margin:0;'
-            }, (t) => { if(t.checked) onChange(val); });
-            const lbl = UI.createNode('span', { style:'margin-left:5px; font-size:11px;' }, String(text));
-            const wrapper = UI.createNode('label', { style:'display:flex; align-items:center; cursor:pointer; margin:0;' }, radio, lbl);
+            const radio = UI.createInput('radio', { name: uniqueName, value: String(val), checked: val === value }, (t) => { if(t.checked) onChange(val); });
+            const lbl = UI.createNode('span', {}, String(text));
+            const wrapper = UI.createNode('label', { className: 'ui-radio-label' }, radio, lbl);
             groupContainer.appendChild(wrapper);
         });
         const row = UI.createRow(label, groupContainer);

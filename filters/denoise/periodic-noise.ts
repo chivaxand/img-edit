@@ -1,8 +1,9 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 import { Lib } from '~/libs/index';
+import { PaletteName } from '~/libs/plot';
 
 // 2D Window generator to minimize spectral leakage for visualization
 const getWindow2D = (w: number, h: number, type: string) => {
@@ -44,13 +45,11 @@ export const PeriodicNoiseWorkspace = {
         const fullW = layer.canvas.width;
         const fullH = layer.canvas.height;
 
-        this.injectStyles();
-
         // Workspace parameters
         let activeTool: 'pen' | 'erase' | 'auto' | 'grid' = 'pen';
         let brushSize = 1;
         let spectrumGain = 1.0;
-        let colormapType = 'grayscale';
+        let colormapType: PaletteName = 'grayscale';
         let windowType = 'none';
         let livePreview = true;
         let isResultActual = false;
@@ -798,7 +797,7 @@ export const PeriodicNoiseWorkspace = {
             onClick: () => redo()
         });
         const clearBtn = UI.createButton({
-            label: 'Clear All Notches', className: 'btn cancel-btn btn-danger',
+            label: 'Clear All Notches', className: 'btn btn-danger',
             onClick: () => {
                 mask.fill(0);
                 pushHistoryState();
@@ -830,12 +829,8 @@ export const PeriodicNoiseWorkspace = {
             onInput: (v) => { spectrumGain = parseFloat(v); renderFourierBackbuffer(); drawFourier(); }
         }));
 
-        ws.sidebar.appendChild(UI.createSelectRow({
+        ws.sidebar.appendChild(UI.createPaletteSelectRow({
             label: 'Colormap',
-            options: [
-                { value: 'grayscale', text: 'Grayscale Map' },
-                { value: 'hot', text: 'Thermal (Hot)' }
-            ],
             value: colormapType,
             onChange: (v) => { colormapType = v; renderFourierBackbuffer(); drawFourier(); }
         }));
@@ -886,24 +881,6 @@ export const PeriodicNoiseWorkspace = {
             updateHistoryButtons();
             statusCoordsEl.textContent = 'Grayscale Map';
         }, 50);
-    },
-
-    injectStyles() {
-        if (document.getElementById('pn-workspace-style')) return;
-        const style = document.createElement('style');
-        style.id = 'pn-workspace-style';
-        style.textContent = `
-            .pn-panels-container { display: flex; width: 100%; height: 100%; gap: 15px; padding: 15px; box-sizing: border-box; background: #141414; }
-            .pn-panel { flex: 1; display: flex; flex-direction: column; background: #1e1e1e; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
-            .pn-panel-header { display: flex; justify-content: space-between; align-items: center; background: #252526; padding: 8px 12px; border-bottom: 1px solid #333; font-weight: bold; font-size: 11px; color: #aaa; text-transform: uppercase; }
-            .pn-canvas-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 10px; background-image: linear-gradient(45deg, #181818 25%, transparent 25%), linear-gradient(-45deg, #181818 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181818 75%), linear-gradient(-45deg, transparent 75%, #181818 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px; position: relative; }
-            .pn-canvas { box-shadow: 0 4px 12px rgba(0,0,0,0.5); object-fit: contain; image-rendering: pixelated; background: transparent; cursor: crosshair; max-width: 100%; max-height: 100%; }
-            .pn-tool-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-            .pn-tool-btn { background-color: #121212; border: 1px solid #333; color: #ccc; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s ease; font-weight: bold; }
-            .pn-tool-btn:hover { background-color: #2a2a2a; border-color: #007acc; }
-            .pn-tool-btn.active { border-color: #007acc; background-color: rgba(0, 122, 204, 0.15); color: #fff; }
-        `;
-        document.head.appendChild(style);
     }
 };
 
@@ -913,13 +890,14 @@ if (typeof window !== 'undefined') {
 
 Filters.register('periodic-noise', {
     name: 'Periodic Noise Remover',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Filter/Denoise',
         label: 'Periodic Noise Filter...',
         order: 6
     },
-    apply(l: Layer) {
+    apply(ctx: FilterContext) {
+        const l = ctx.layer;
         PeriodicNoiseWorkspace.open();
     }
 });

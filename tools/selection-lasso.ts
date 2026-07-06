@@ -605,18 +605,7 @@ App.registerTool({
         else if (e.altKey) this.currentMode = 'sub';
         else this.currentMode = this.settings.mode || 'new';
 
-        if (this.currentMode === 'new' || App.state.selection.layerId !== l.id || !App.state.selection.mask) {
-            App.state.selection.layerId = l.id;
-            App.state.selection.mask = document.createElement('canvas');
-            App.state.selection.mask.width = l.canvas.width;
-            App.state.selection.mask.height = l.canvas.height;
-            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
-            App.state.selection.outline = null;
-
-            if (this.currentMode === 'new') {
-                App.state.selection.active = false;
-            }
-        }
+        // Do not clear the selection immediately on mousedown when starting a new selection
 
         const type = this.settings.type || 'free';
 
@@ -964,7 +953,16 @@ App.registerTool({
 
     finishSelection() {
         const l = App.utils.getActive();
-        if (!l || !App.state.selection.mask) return;
+        if (!l) return;
+
+        if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
+            App.state.selection.layerId = l.id;
+            App.state.selection.mask = document.createElement('canvas');
+            App.state.selection.mask.width = l.canvas.width;
+            App.state.selection.mask.height = l.canvas.height;
+            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
+            App.state.selection.outline = null;
+        }
 
         const ctx = App.state.selection.ctx!;
         ctx.save();

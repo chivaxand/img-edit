@@ -12,13 +12,29 @@ export interface FilterParam {
     val: number;
 }
 
+export interface FilterContext {
+    layer: Layer;
+    values: any;
+    selection: {
+        active: boolean;
+        mask: HTMLCanvasElement | null;
+        ctx: CanvasRenderingContext2D | null;
+    };
+    layers: Layer[];
+    width: number;
+    height: number;
+    createLayer: (name: string, img?: HTMLImageElement | HTMLCanvasElement, type?: string) => Layer | null;
+    addLayer: (l: Layer) => void;
+    processPixels: (fn: (data: Uint8ClampedArray, w: number, h: number) => void) => void;
+}
+
 export interface FilterDef {
     name: string;
-    mode: 'css' | 'pixel';
+    mode: 'css' | 'pixel' | 'unified';
     filter?: (values: any) => string;
     params?: FilterParam[];
     process?: (data: Uint8ClampedArray, w: number, h: number, values: any) => void;
-    apply?: (layer: Layer, values: any) => void;
+    apply?: (context: FilterContext) => void;
     renderUI?: (root: HTMLElement, layer: Layer, hooks: any) => void;
     dialogOptions?: { width?: string; maxWidth?: string };
     menu?: { path: string; label?: string; order?: number };
@@ -54,25 +70,74 @@ export const Filters = {
     },
 
     applyEffect(l: Layer, def: FilterDef, values: any, record = true) {
+        let targetLayer = l;
+        const hasNewLayer = values && values._newLayer;
+        
+        if (hasNewLayer) {
+            const nc = document.createElement('canvas');
+            nc.width = l.canvas.width;
+            nc.height = l.canvas.height;
+            nc.getContext('2d')!.drawImage(l.canvas, 0, 0);
+
+            const newL = { ...l, id: Date.now() + Math.random(), name: `${l.name} (${def.name})`, canvas: nc, ctx: nc.getContext('2d')! } as Layer;
+
+            // Ensure selection moves with the new layer
+            if (App.state.selection.layerId === l.id) {
+                App.state.selection.layerId = newL.id;
+            }
+
+            // Insert above original layer
+            const idx = App.state.layers.indexOf(l);
+            if (idx >= 0) {
+                App.state.layers.splice(idx, 0, newL);
+            } else {
+                App.state.layers.unshift(newL);
+            }
+
+            App.actions.setActiveLayer(newL.id);
+            targetLayer = newL;
+        }
+
+        const context: FilterContext = {
+            layer: targetLayer,
+            values: values,
+            selection: {
+                active: App.state.selection.active,
+                mask: App.state.selection.mask,
+                ctx: App.state.selection.ctx
+            },
+            layers: App.state.layers,
+            width: App.state.width,
+            height: App.state.height,
+            createLayer: (name, img, type) => App.actions.createLayer(name, img, type),
+            addLayer: (layer) => App.actions.addLayer(layer),
+            processPixels: (fn) => this.processPixels(targetLayer, fn)
+        };
+
         if (def.apply) {
-            def.apply(l, values);
+            if (def.mode === 'unified') {
+                def.apply(context);
+            } else {
+                // Backward compatibility for old (layer, values) signatures
+                (def.apply as any)(targetLayer, values);
+            }
         } else if (def.mode === 'css') {
             const tmp = document.createElement('canvas');
-            tmp.width = l.canvas.width; tmp.height = l.canvas.height;
-            tmp.getContext('2d')!.drawImage(l.canvas, 0, 0);
+            tmp.width = targetLayer.canvas.width; tmp.height = targetLayer.canvas.height;
+            tmp.getContext('2d')!.drawImage(targetLayer.canvas, 0, 0);
             const filtered = document.createElement('canvas');
-            filtered.width = l.width; filtered.height = l.height;
+            filtered.width = targetLayer.width; filtered.height = targetLayer.height;
             const fCtx = filtered.getContext('2d')!;
             fCtx.filter = def.filter!(values);
             fCtx.drawImage(tmp, 0, 0);
             fCtx.filter = 'none';
-            this.processPixels(l, (data: Uint8ClampedArray, w: number, h: number) => {
+            this.processPixels(targetLayer, (data: Uint8ClampedArray, w: number, h: number) => {
                 const fData = fCtx.getImageData(0,0,w,h).data;
                 for(let i=0; i<data.length; i++) data[i] = fData[i];
             });
         } 
         else if (def.mode === 'pixel' && def.process) {
-            this.processPixels(l, (data: Uint8ClampedArray, w: number, h: number) => def.process!(data, w, h, values));
+            this.processPixels(targetLayer, (data: Uint8ClampedArray, w: number, h: number) => def.process!(data, w, h, values));
         }
 
         if (record) {
@@ -146,12 +211,17 @@ export const Filters = {
             <h2>${def.name}</h2>
             <div id="filter-ui-root"></div>
             <div class="popup-actions" style="justify-content:space-between; align-items:center;">
-                <label style="display:flex; align-items:center; cursor:pointer; color:inherit; font-size:13px; margin:0; user-select:none;">
-                    <input type="checkbox" id="chk-preview" checked style="width:auto; margin:0 5px 0 0;"> Preview
-                </label>
-                <div>
-                    <button class="cancel-btn" id="btn-cancel">Cancel</button>
-                    <button id="btn-ok">Apply</button>
+                <div style="display:flex; gap:15px; align-items:center;">
+                    <label class="ui-checkbox-label" style="font-size:13px; margin:0;">
+                        <input type="checkbox" id="chk-preview" class="ui-checkbox" checked> Preview
+                    </label>
+                    <label class="ui-checkbox-label" style="font-size:13px; margin:0;">
+                        <input type="checkbox" id="chk-new-layer" class="ui-checkbox"> New layer
+                    </label>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn cancel-btn" id="btn-cancel">Cancel</button>
+                    <button class="btn" id="btn-ok">Apply</button>
                 </div>
             </div>
         `);
@@ -197,6 +267,11 @@ export const Filters = {
             commit: (vals: any) => {
                 restore();
                 App.actions.saveState();
+
+                const chkNewLayer = p.getById('chk-new-layer') as HTMLInputElement;
+                if (chkNewLayer && chkNewLayer.checked) {
+                    vals = { ...vals, _newLayer: true };
+                }
                 this.applyEffect(layer, def, vals, true);
                 p.close();
             }

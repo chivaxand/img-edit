@@ -1,3 +1,24 @@
+export type ColorRGB = [number, number, number];
+export type ColorRGBA = [number, number, number, number];
+export type ListPalette = Array<[number, ColorRGB]>;
+export type ChannelDefinition = ((value: number) => number) | Array<[number, number, number]>;
+
+export interface ChannelPalette {
+    red: ChannelDefinition;
+    green: ChannelDefinition;
+    blue: ChannelDefinition;
+}
+
+export type Palette = ListPalette | ChannelPalette;
+export type PaletteName = 'seismic' | 'bwr' | 'hot' | 'grayscale' | 'bone';
+
+export interface RenderOptions {
+    palette?: PaletteName;
+    gamma?: number;
+    ignoreDC?: boolean;
+    logScale?: boolean;
+}
+
 export const plot = {
     palettes: {
         seismic: [[0, [0, 0, 77]], [0.25, [0, 0, 255]], [0.5, [255, 255, 255]], [0.75, [255, 0, 0]], [1, [128, 0, 0]]],
@@ -9,9 +30,9 @@ export const plot = {
             green: [[0, 0, 0], [0.365079, 0.319444, 0.319444], [0.746032, 0.777778, 0.777778], [1, 1, 1]],
             blue: [[0, 0, 0], [0.365079, 0.444444, 0.444444], [1, 1, 1]]
         },
-    } as Record<string, any>,
+    } as Record<string, Palette>,
 
-    getColor(value: number, paletteName: string): number[] {
+    getColor(value: number, paletteName: PaletteName): ColorRGBA {
         value = Math.max(0, Math.min(1, value));
         const data = this.palettes[paletteName] || this.palettes.seismic;
         // Array-based standard stops
@@ -27,7 +48,26 @@ export const plot = {
         ];
     },
 
-    renderMatrix(data: number[][] | Float32Array[], canvas: HTMLCanvasElement, options: any = {}) {
+    drawPalettePreview(canvas: HTMLCanvasElement, paletteName: PaletteName): void {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const { width, height } = canvas;
+        const imgData = ctx.createImageData(width, height);
+        const data = imgData.data;
+        for (let x = 0; x < width; x++) {
+            const [r, g, b] = this.getColor(x / (width - 1), paletteName);
+            for (let y = 0; y < height; y++) {
+                const idx = (y * width + x) * 4;
+                data[idx] = r;
+                data[idx + 1] = g;
+                data[idx + 2] = b;
+                data[idx + 3] = 255;
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+    },
+
+    renderMatrix(data: number[][] | Float32Array[], canvas: HTMLCanvasElement, options: RenderOptions = {}) {
         const { palette = 'seismic', gamma = 1.0, ignoreDC = false, logScale = false } = options;
         if (!data || !data.length) return;
         const h = data.length, w = data[0].length;
@@ -82,7 +122,7 @@ export const plot = {
         ctx.putImageData(imgData, 0, 0);
     },
 
-    _getListedColor(value: number, colorScale: any[]): number[] {
+    _getListedColor(value: number, colorScale: ListPalette): ColorRGBA {
         for (let i = 1; i < colorScale.length; i++) {
             if (value <= colorScale[i][0]) {
                 const [percent1, color1] = colorScale[i-1];
@@ -101,7 +141,7 @@ export const plot = {
         return [last[0], last[1], last[2], 255];
     },
 
-    _resolveChannel(value: number, definition: any): number {
+    _resolveChannel(value: number, definition: ChannelDefinition): number {
         if (typeof definition === 'function') {
             return definition(value);
         }
@@ -111,7 +151,7 @@ export const plot = {
         return 0;
     },
 
-    _interpolateSegment(val: number, segments: any[]): number {
+    _interpolateSegment(val: number, segments: Array<[number, number, number]>): number {
         for (let i = 0; i < segments.length - 1; i++) {
             const s1 = segments[i];
             const s2 = segments[i+1];

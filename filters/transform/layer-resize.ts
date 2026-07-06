@@ -2,7 +2,7 @@ import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Lib } from '~/libs/index';
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 const _resizeFilters = {
     bicubic(x: number) {
@@ -271,14 +271,16 @@ function _resizeLayerObj(l: Layer, w: number, h: number, algo: string = 'bilinea
 
 Filters.register('resize', {
     name: 'Resize Layer',
-    mode: 'pixel',
+    mode: 'unified',
     menu: {
         path: 'Transform',
         label: 'Resize...',
         order: 1
     },
 
-    apply(l: Layer, state: any) {
+    apply(context: FilterContext) {
+        const l = context.layer;
+        const state = context.values;
         const origW = state.origW !== undefined ? state.origW : l.width;
         const origH = state.origH !== undefined ? state.origH : l.height;
         const origX = state.origX !== undefined ? state.origX : l.x;
@@ -362,17 +364,21 @@ Filters.register('resize', {
             update();
         });
 
-        const constrainCheck = UI.createInput('checkbox', { checked: state.constrain }, (t: HTMLInputElement) => {
-            state.constrain = t.checked;
-            if (state.constrain) {
-                updateInputs('w');
-                update();
+        const constrainCheck = UI.createCheckbox({
+            label: 'Constrain Proportions',
+            value: state.constrain,
+            onChange: (v: boolean) => {
+                state.constrain = v;
+                if (state.constrain) {
+                    updateInputs('w');
+                    update();
+                }
             }
         });
 
         root.appendChild(UI.createRow('Width', wInp));
         root.appendChild(UI.createRow('Height', hInp));
-        root.appendChild(UI.createRow('', UI.createNode('label', {style:'display:flex;align-items:center'}, constrainCheck, UI.createNode('span',{style:'margin-left:5px'},'Constrain Proportions'))));
+        root.appendChild(UI.createRow('', constrainCheck));
         
         root.appendChild(UI.createNode('div', {className:'popup-separator'}));
 

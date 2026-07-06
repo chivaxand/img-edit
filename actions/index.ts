@@ -1,6 +1,7 @@
 import { App, AppActions } from '~/app';
 import { coreActions } from './core';
-import { layersActions } from './layers';
+import { layersActions } from './layer-actions';
+import { selectionActions } from './selection-actions';
 import { transformActions } from '~/filters/transform/flip-rotate-skew';
 import { layerCanvasSizeActions } from '~/filters/transform/layer-canvas-size';
 import { layerResizeActions } from '~/filters/transform/layer-resize';
@@ -13,6 +14,7 @@ import './jpeg-export';
 const allActions: AppActions = {
     ...coreActions,
     ...layersActions,
+    ...selectionActions,
     ...transformActions,
     ...layerCanvasSizeActions,
     ...layerResizeActions,

@@ -1,4 +1,4 @@
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
@@ -8,7 +8,7 @@ Filters.register('blue-noise', {
     menu: {
         path: 'Generate',
         label: 'Blue Noise...',
-        order: 2
+        order: 3
     },
 
     // Cache the last generated mask to avoid re-computing on every redraw

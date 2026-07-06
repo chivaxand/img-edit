@@ -22,20 +22,28 @@ body { margin: 0; padding: 0; background: var(--bg-color); color: var(--text-col
 #workspace { flex: 1; background: #111; position: relative; overflow: auto; display: flex; }
 #sidebar { width: 260px; background: var(--panel-color); border-left: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
 
-/* Components */
+/* UI Components Library */
 .panel-section { padding: 10px; border-bottom: 1px solid var(--border-color); }
 .panel-header { font-weight: bold; margin-bottom: 8px; color: #fff; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center; }
-.row { display: flex; gap: 5px; margin-bottom: 5px; align-items: center; }
-label { color: #aaa; font-size: 11px; min-width: 40px; }
 
-/* Inputs */
-input[type=text], input[type=number], select { background: #3c3c3c; border: 1px solid #3c3c3c; color: white; padding: 3px; border-radius: 2px; width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; }
-input[type=text]:focus, input[type=number]:focus, select:focus { border-color: var(--accent-color); outline: none; }
-input[type=range] { width: 100%; cursor: pointer; vertical-align: middle; }
-input[type=checkbox] { margin: 0 5px 0 0; vertical-align: middle; }
-button.btn { background: var(--accent-color); color: white; border: 0; padding: 4px 10px; border-radius: 2px; cursor: pointer; font-size: 11px; }
+.ui-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; width: 100%; box-sizing: border-box; }
+.ui-row > label { margin: 0; flex-shrink: 0; min-width: 60px; color: #aaa; font-size: 11px; display: flex; align-items: center; }
+.ui-row > .ui-input, .ui-row > .ui-select, .ui-row > div { flex: 1; min-width: 0; }
+
+.ui-input, .ui-select, .ui-textarea { background: #3c3c3c; border: 1px solid #3c3c3c; color: white; padding: 4px; border-radius: 2px; width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; transition: border-color 0.2s; }
+.ui-input:focus, .ui-select:focus, .ui-textarea:focus { border-color: var(--accent-color); outline: none; }
+.ui-range { width: 100%; cursor: pointer; vertical-align: middle; margin: 0; }
+
+.ui-checkbox-label, .ui-radio-label { display: flex; align-items: center; cursor: pointer; margin: 4px 0; color: #aaa; font-size: 11px; user-select: none; }
+.ui-checkbox, .ui-radio { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
+
+button.btn { background: var(--accent-color); color: white; border: 0; padding: 5px 10px; border-radius: 2px; cursor: pointer; font-size: 11px; transition: background-color 0.2s, opacity 0.2s; display: inline-flex; justify-content: center; align-items: center; }
 button.btn:hover { opacity: 0.9; }
-button.btn-danger { background: #d55; }
+button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+button.cancel-btn { background: #3e3e42; }
+button.cancel-btn:hover { background: #4e4e52; }
+button.btn-danger { background: #dd5555; }
+button.btn-danger:hover { background: #ff6666; }
 
 /* Toolbar Icons */
 button.icon-btn { background: transparent; border: 1px solid transparent; color: var(--text-color); width: 34px; height: 34px; cursor: pointer; border-radius: 3px; font-size: 18px; display: flex; justify-content: center; align-items: center; }
@@ -45,7 +53,7 @@ button.icon-btn.active { background: var(--accent-color); color: white; }
 /* Color Picker */
 .color-box { grid-column: span 2; justify-self: center; position: relative; width: 36px; height: 36px; margin-top: 15px; margin-bottom: 10px; }
 .c-swatch { width: 24px; height: 24px; border: 1px solid #fff; position: absolute; cursor: pointer; }
-input[type=color] { opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; }
+.ui-color { opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; margin: 0; display: block; }
 
 /* Layer List */
 #layer-list { flex: 1; overflow-y: auto; min-height: 100px; }
@@ -83,9 +91,11 @@ canvas { display: block; cursor: crosshair; touch-action: none; }
             <div class="panel-header" style="padding:10px;">
                 Layers
                 <div style="display:flex; gap:2px;">
+                    <button class="btn" id="btn-merge-down" title="Merge Down">↴</button>
                     <button class="btn" id="btn-layer-up" title="Move Up">↑</button>
                     <button class="btn" id="btn-layer-down" title="Move Down">↓</button>
                     <button class="btn" id="btn-add-layer" title="New Layer" style="margin-left:5px;">+</button>
+                    <button class="btn" id="btn-dup-layer" title="Duplicate Layer">❐</button>
                     <button class="btn btn-danger" id="btn-del-layer" title="Delete Layer">-</button>
                 </div>
             </div>

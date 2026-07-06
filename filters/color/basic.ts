@@ -1,4 +1,4 @@
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 
 Filters.register('grayscale', {
     name: 'Grayscale',

@@ -1,4 +1,4 @@
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
@@ -8,7 +8,7 @@ Filters.register('perlin-noise', {
     menu: {
         path: 'Generate',
         label: 'Perlin Noise...',
-        order: 3
+        order: 4
     },
 
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {

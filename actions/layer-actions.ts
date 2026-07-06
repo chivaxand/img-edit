@@ -5,7 +5,7 @@ export const layersActions: Pick<AppActions,
     'createLayer' | 'addEmptyLayer' | 'addLayer' | 'addTextLayer' |
     'updateLayer' | 'rasterizeLayer' | 'deleteLayer' | 'setActiveLayer' |
     'toggleVis' | 'setLayerProp' | 'transformLayer' | 'centerActiveLayer' |
-    'handleFiles' | 'mergeAll' | 'duplicateLayer' | 'moveLayer'
+    'handleFiles' | 'mergeAll' | 'duplicateLayer' | 'moveLayer' | 'mergeLayerDown'
 > = {
     createLayer(name: string, img?: HTMLImageElement | HTMLCanvasElement, type = 'raster') {
         return Layers.create(type, { name, img, width: App.state.width, height: App.state.height });
@@ -195,6 +195,34 @@ export const layersActions: Pick<AppActions,
         [App.state.layers[i], App.state.layers[ni]] = [App.state.layers[ni], App.state.layers[i]];
         
         App.recordAction(`api.moveActiveLayer(${dir});`);
+        App.emit('layers:structure');
+    },
+
+    mergeLayerDown() {
+        const l = App.utils.getActive();
+        if (!l) return;
+        const idx = App.state.layers.indexOf(l);
+        if (idx < 0 || idx >= App.state.layers.length - 1) return;
+
+        App.actions.saveState();
+
+        const bottomLayer = App.state.layers[idx + 1];
+        const temp = document.createElement('canvas');
+        temp.width = bottomLayer.canvas.width; 
+        temp.height = bottomLayer.canvas.height;
+        const tempCtx = temp.getContext('2d')!;
+        tempCtx.drawImage(bottomLayer.canvas, 0, 0);
+        tempCtx.save();
+        tempCtx.globalAlpha = l.opacity;
+        tempCtx.globalCompositeOperation = l.blend as GlobalCompositeOperation;
+        tempCtx.drawImage(l.canvas, l.x - bottomLayer.x, l.y - bottomLayer.y, l.width, l.height);
+        tempCtx.restore();
+        bottomLayer.ctx.clearRect(0, 0, bottomLayer.width, bottomLayer.height);
+        bottomLayer.ctx.drawImage(temp, 0, 0);
+
+        App.state.layers.splice(idx, 1);
+        App.actions.setActiveLayer(bottomLayer.id);
+        App.recordAction("api.mergeActiveLayerDown();");
         App.emit('layers:structure');
     },
 };

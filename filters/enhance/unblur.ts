@@ -1,4 +1,4 @@
-import { Filters } from '~/filters';
+import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Lib } from '~/libs/index';
@@ -93,8 +93,6 @@ Filters.register('unblur', {
         container.appendChild(UI.createNode('div', {className:'popup-separator'}, ''));
         container.appendChild(UI.createNode('div', {className:'popup-subtitle'}, 'Estimated Kernel (OBD)'));
 
-        const estimateBtn = UI.createNode('button', { style: { width:'100%', margin:'5px 0' }}, 'Estimate Kernel');
-
         // Canvas (initially hidden)
         const kernelCanvas = document.createElement('canvas');
         kernelCanvas.width = 256;
@@ -105,19 +103,22 @@ Filters.register('unblur', {
         kernelCanvas.style.imageRendering = 'pixelated';
         kernelCanvas.style.display = 'none'; // <-- hidden at start
 
+        const estimateBtn = UI.createButton({
+            label: 'Estimate Kernel',
+            style: { width: '100%', margin: '5px 0' },
+            onClick: () => {
+                estimateBtn.style.display = 'none';
+                kernelCanvas.style.display = 'block';
+                this.onEstimateTap(layer, kernelCanvas, originalImgData);
+            }
+        });
+
         const kWrap = UI.createNode('div', { style: { display:'flex', justifyContent:'center', width:'100%' } }, kernelCanvas);
         container.appendChild(estimateBtn);
         container.appendChild(kWrap);
         container.appendChild(
-            UI.createNode('div', { className:'popup-hint', style:'text-align:center; margin-top:5px;' }, '64x64 Kernel Estimation')
+            UI.createHint('64x64 Kernel Estimation', { style: { textAlign: 'center', marginTop: '5px' } })
         );
-
-        // --- Button Handler ---
-        estimateBtn.addEventListener('click', () => {
-            estimateBtn.style.display = 'none';
-            kernelCanvas.style.display = 'block';
-            this.onEstimateTap(layer, kernelCanvas, originalImgData);
-        });
 
         // Initialize UI state
         updateControls();

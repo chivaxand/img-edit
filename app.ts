@@ -5,8 +5,6 @@ import { Layers, Layer } from '~/layers';
 import { Menu } from '~/menu';
 import { Filters } from '~/filters';
 
-declare var Lib: any;
-
 export interface AppPointerEvent {
     clientX: number;
     clientY: number;
@@ -99,7 +97,12 @@ export interface AppActions {
     stepZoom(dir: number): void;
     exportBase64(): void;
     deleteSelection(): void;
+    inverseSelection(): void;
     updateSelectionOutline(): void;
+    saveSelection(mode?: 'content' | 'mask', inverse?: boolean): void;
+    loadSelection(layerIndex?: number, mode?: 'alpha' | 'grayscale', inverse?: boolean): void;
+    openSaveSelectionDialog(): void;
+    openLoadSelectionDialog(): void;
     moveLayer(dir: number): void;
     openResizeDialog(): void;
     openTransformDialog(): void;
@@ -110,6 +113,7 @@ export interface AppActions {
     clearRecording(): void;
     mergeAll(): void;
     duplicateLayer(): void;
+    mergeLayerDown(): void;
 }
 
 export const App = {
@@ -304,6 +308,10 @@ export const App = {
             this.render();
         });
         this.on('record:update', () => {
+            const headerEl = document.getElementById('app-header') || document.getElementById('header-controls') || document.querySelector('.header');
+            if (headerEl) {
+                (headerEl as HTMLElement).style.backgroundColor = this.state.recording ? '#4c1d1d' : '';
+            }
             updateStatus();
         });
     },
@@ -355,7 +363,9 @@ export const App = {
         // Sidebar Buttons (Layer Actions)
         document.getElementById('btn-layer-up')!.onclick = () => this.actions.moveLayer(-1);
         document.getElementById('btn-layer-down')!.onclick = () => this.actions.moveLayer(1);
+        document.getElementById('btn-merge-down')!.onclick = () => this.actions.mergeLayerDown();
         document.getElementById('btn-add-layer')!.onclick = () => this.actions.addEmptyLayer();
+        document.getElementById('btn-dup-layer')!.onclick = () => this.actions.duplicateLayer();
         document.getElementById('btn-del-layer')!.onclick = () => this.actions.deleteLayer();
         document.getElementById('btn-open')!.onclick = () => document.getElementById('file-upload')!.click();
         document.getElementById('file-upload')!.onchange = (e: Event) => this.actions.handleFiles((e.target as HTMLInputElement).files!);

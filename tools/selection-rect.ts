@@ -40,23 +40,6 @@ App.registerTool({
         if (e.ctrlKey || e.metaKey) this.mode = 'add';
         else if (e.altKey) this.mode = 'sub';
         else this.mode = this.settings.mode || 'new';
-
-        // Initialize mask if needed or if starting new selection
-        if (this.mode === 'new' || App.state.selection.layerId !== l.id || !App.state.selection.mask) {
-            App.state.selection.layerId = l.id;
-            App.state.selection.mask = document.createElement('canvas');
-            App.state.selection.mask.width = l.canvas.width;
-            App.state.selection.mask.height = l.canvas.height;
-            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
-            
-            // Clear outline cache
-            App.state.selection.outline = null;
-
-            // If mode is new, we clear it (it's already empty) and set active false until mouse up
-            if (this.mode === 'new') {
-                App.state.selection.active = false;
-            }
-        }
     },
 
     onMouseMove(e: MouseEvent) {
@@ -95,7 +78,7 @@ App.registerTool({
         App.state.isDrawing = false;
         
         const l = App.utils.getActive();
-        if (!l || App.state.selection.layerId !== l.id) return;
+        if (!l) return;
 
         const pos = App.utils.getPos(e);
         
@@ -106,8 +89,17 @@ App.registerTool({
         const gh = Math.abs(pos.y - this.start.y);
 
         if (gw < 1 || gh < 1) {
-            if (this.mode === 'new') App.actions.deselect();
             return;
+        }
+
+        // Initialize mask if needed
+        if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
+            App.state.selection.layerId = l.id;
+            App.state.selection.mask = document.createElement('canvas');
+            App.state.selection.mask.width = l.canvas.width;
+            App.state.selection.mask.height = l.canvas.height;
+            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
+            App.state.selection.outline = null;
         }
 
         // Convert to Layer Local Coordinates

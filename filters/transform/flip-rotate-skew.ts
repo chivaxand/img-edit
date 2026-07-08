@@ -56,18 +56,133 @@ Filters.register('skew-rotate', {
         nc.width = newW; nc.height = newH;
         const ctx = nc.getContext('2d')!;
         
-        ctx.imageSmoothingEnabled = p.smooth;
-        ctx.imageSmoothingQuality = p.smooth ? 'high' : 'low';
+        const algo = p.interpolation || (p.smooth ? 'bilinear' : 'nearest');
 
-        ctx.save();
-        ctx.translate(-minX, -minY); // Shift to visible area
-        ctx.translate(origW/2, origH/2);
-        ctx.rotate(rad(p.rotate));
-        ctx.transform(1, tanY, tanX, 1, 0, 0);
-        ctx.scale(scaleX, scaleY);
-        ctx.translate(-origW/2, -origH/2);
-        ctx.drawImage(origCanvas, 0, 0);
-        ctx.restore();
+        if (algo === 'bicubic' || algo === 'lanczos') {
+            const srcCtx = origCanvas.getContext('2d')!;
+            const srcData = srcCtx.getImageData(0, 0, origW, origH);
+            const src8 = srcData.data;
+
+            const dstData = ctx.createImageData(newW, newH);
+            const dst8 = dstData.data;
+
+            const r_rad = rad(p.rotate);
+            const cos = Math.cos(r_rad);
+            const sin = Math.sin(r_rad);
+            const D = 1 - tanX * tanY;
+
+            const cx_src = origW / 2;
+            const cy_src = origH / 2;
+
+            const getPixel = (sx: number, sy: number, c: number) => {
+                if (sx < 0) sx = 0; else if (sx >= origW) sx = origW - 1;
+                if (sy < 0) sy = 0; else if (sy >= origH) sy = origH - 1;
+                return src8[(sy * origW + sx) * 4 + c];
+            };
+
+            const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => {
+                return 0.5 * ((2 * p1) + (-p0 + p2) * t + 
+                    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + 
+                    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
+            };
+
+            const sampleBicubic = (x: number, y: number, c: number) => {
+                const x0 = Math.floor(x);
+                const y0 = Math.floor(y);
+                const dx = x - x0;
+                const dy = y - y0;
+                const r_m1 = cubic(getPixel(x0 - 1, y0 - 1, c), getPixel(x0, y0 - 1, c), getPixel(x0 + 1, y0 - 1, c), getPixel(x0 + 2, y0 - 1, c), dx);
+                const r_0  = cubic(getPixel(x0 - 1, y0,     c), getPixel(x0, y0,     c), getPixel(x0 + 1, y0,     c), getPixel(x0 + 2, y0,     c), dx);
+                const r_1  = cubic(getPixel(x0 - 1, y0 + 1, c), getPixel(x0, y0 + 1, c), getPixel(x0 + 1, y0 + 1, c), getPixel(x0 + 2, y0 + 1, c), dx);
+                const r_2  = cubic(getPixel(x0 - 1, y0 + 2, c), getPixel(x0, y0 + 2, c), getPixel(x0 + 1, y0 + 2, c), getPixel(x0 + 2, y0 + 2, c), dx);
+                const val = cubic(r_m1, r_0, r_1, r_2, dy);
+                return val < 0 ? 0 : (val > 255 ? 255 : val);
+            };
+
+            const l_sinc = (v: number) => {
+                if (v === 0) return 1;
+                const pv = Math.PI * v;
+                return Math.sin(pv) / pv;
+            };
+
+            const l_weight = (v: number) => {
+                if (v < 0) v = -v;
+                if (v >= 3) return 0;
+                return l_sinc(v) * l_sinc(v / 3);
+            };
+
+            const sampleLanczos = (x: number, y: number, c: number) => {
+                const x0 = Math.floor(x);
+                const y0 = Math.floor(y);
+                let sum = 0, weightSum = 0;
+                for (let j = -2; j <= 3; j++) {
+                    const sy = y0 + j;
+                    const wy = l_weight(y - sy);
+                    if (wy === 0) continue;
+                    for (let i = -2; i <= 3; i++) {
+                        const sx = x0 + i;
+                        const wx = l_weight(x - sx);
+                        const w = wx * wy;
+                        if (w === 0) continue;
+                        sum += getPixel(sx, sy, c) * w;
+                        weightSum += w;
+                    }
+                }
+                if (weightSum === 0) return 0;
+                const val = sum / weightSum;
+                return val < 0 ? 0 : (val > 255 ? 255 : val);
+            };
+
+            const sampler = algo === 'bicubic' ? sampleBicubic : sampleLanczos;
+
+            for (let v = 0; v < newH; v++) {
+                const y0 = (v + minY) - cy_src;
+                for (let u = 0; u < newW; u++) {
+                    const x0 = (u + minX) - cx_src;
+
+                    const x1 = x0 * cos + y0 * sin;
+                    const y1 = -x0 * sin + y0 * cos;
+
+                    let x2 = x1;
+                    let y2 = y1;
+                    if (Math.abs(D) > 0.0001) {
+                        x2 = (x1 - y1 * tanX) / D;
+                        y2 = (-x1 * tanY + y1) / D;
+                    }
+
+                    const x3 = x2 / scaleX;
+                    const y3 = y2 / scaleY;
+
+                    const x_src = x3 + cx_src;
+                    const y_src = y3 + cy_src;
+
+                    const idx = (v * newW + u) * 4;
+                    if (x_src < -1 || x_src > origW || y_src < -1 || y_src > origH) {
+                        dst8[idx] = dst8[idx+1] = dst8[idx+2] = dst8[idx+3] = 0;
+                    } else {
+                        dst8[idx]   = sampler(x_src, y_src, 0);
+                        dst8[idx+1] = sampler(x_src, y_src, 1);
+                        dst8[idx+2] = sampler(x_src, y_src, 2);
+                        dst8[idx+3] = sampler(x_src, y_src, 3);
+                    }
+                }
+            }
+
+            ctx.putImageData(dstData, 0, 0);
+        } else {
+            ctx.imageSmoothingEnabled = algo === 'bilinear';
+            ctx.imageSmoothingQuality = algo === 'bilinear' ? 'high' : 'low';
+
+            ctx.save();
+            ctx.translate(-minX, -minY); // Shift to visible area
+            ctx.translate(origW/2, origH/2);
+            ctx.rotate(rad(p.rotate));
+            ctx.transform(1, tanY, tanX, 1, 0, 0);
+            ctx.scale(scaleX, scaleY);
+            ctx.translate(-origW/2, -origH/2);
+            ctx.drawImage(origCanvas, 0, 0);
+            ctx.restore();
+        }
 
         // Apply to layer
         l.canvas = nc;
@@ -99,10 +214,61 @@ Filters.register('skew-rotate', {
             rotate: 0,
             skewX: 0,
             skewY: 0,
-            smooth: true
+            smooth: true,
+            interpolation: 'bilinear'
         };
 
-        const update = () => hooks.preview(p);
+        const canvasContainer = UI.createNode('div', {
+            style: {
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 0 15px 0',
+                padding: '10px',
+                background: '#1a1a1a',
+                borderRadius: '6px',
+                border: '1px solid #333'
+            }
+        });
+
+        const intCanvas = UI.createNode('canvas', {
+            width: 240,
+            height: 240,
+            style: {
+                background: '#111',
+                borderRadius: '4px',
+                cursor: 'default',
+                boxShadow: 'inset 0 0 8px rgba(0,0,0,0.8)'
+            }
+        }) as HTMLCanvasElement;
+        
+        canvasContainer.appendChild(intCanvas);
+
+        const matrixContainer = UI.createNode('div', {
+            style: {
+                marginTop: '8px',
+                fontFamily: 'monospace',
+                fontSize: '11px',
+                color: '#aaa',
+                textAlign: 'center',
+                background: '#222',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                border: '1px solid #444',
+                display: 'inline-block',
+                width: '180px'
+            }
+        });
+        canvasContainer.appendChild(matrixContainer);
+
+        root.appendChild(canvasContainer);
+
+        const update = () => {
+            hooks.preview(p);
+            drawInteractive();
+            updateMatrixDisplay();
+        };
 
         const wInp = UI.createInput('number', { value: p.w }, (t: HTMLInputElement) => {
             p.w = parseFloat(t.value) || 0;
@@ -130,19 +296,316 @@ Filters.register('skew-rotate', {
         );
         root.appendChild(UI.createRow('Size', sizeControls));
 
-        root.appendChild(UI.createSliderRow({ label: 'Rotate (°)', min: -180, max: 180, value: 0, onInput: (v: string) => { p.rotate = parseFloat(v); update(); } }));
-        root.appendChild(UI.createSliderRow({ label: 'Skew X (°)', min: -89, max: 89, value: 0, onInput: (v: string) => { p.skewX = parseFloat(v); update(); } }));
-        root.appendChild(UI.createSliderRow({ label: 'Skew Y (°)', min: -89, max: 89, value: 0, onInput: (v: string) => { p.skewY = parseFloat(v); update(); } }));
+        const rotRow = UI.createSliderRow({ label: 'Rotate (°)', min: -180, max: 180, value: 0, onInput: (v: string) => { p.rotate = parseFloat(v); update(); } });
+        const rotInp = rotRow.querySelector('input') as HTMLInputElement;
+        root.appendChild(rotRow);
+
+        const skewXRow = UI.createSliderRow({ label: 'Skew X (°)', min: -89, max: 89, value: 0, onInput: (v: string) => { p.skewX = parseFloat(v); update(); } });
+        const skewXInp = skewXRow.querySelector('input') as HTMLInputElement;
+        root.appendChild(skewXRow);
+
+        const skewYRow = UI.createSliderRow({ label: 'Skew Y (°)', min: -89, max: 89, value: 0, onInput: (v: string) => { p.skewY = parseFloat(v); update(); } });
+        const skewYInp = skewYRow.querySelector('input') as HTMLInputElement;
+        root.appendChild(skewYRow);
 
         root.appendChild(UI.createSelectRow({
             label: 'Interpolation',
             options: [
-                { value: '1', text: 'Bilinear (Smooth)' },
-                { value: '0', text: 'Nearest (Pixelated)' }
+                { value: 'bilinear', text: 'Bilinear' },
+                { value: 'bicubic', text: 'Bicubic' },
+                { value: 'lanczos', text: 'Lanczos-3' },
+                { value: 'nearest', text: 'Nearest' }
             ],
-            value: '1',
-            onChange: (v: string) => { p.smooth = v === '1'; update(); }
+            value: p.interpolation,
+            onChange: (v: string) => { p.interpolation = v; p.smooth = v === 'bilinear'; update(); }
         }));
+
+        let activeHandle: 'right' | 'top' | 'rotate' | null = null;
+        let startMouseAngle = 0;
+        let startRotate = 0;
+
+        const getHandleCoords = () => {
+            const S_view = 100 / Math.max(p.origW, p.origH);
+            const cx = 120;
+            const cy = 120;
+
+            const rad = (d: number) => d * Math.PI / 180;
+            const r = rad(p.rotate);
+            const cos = Math.cos(r);
+            const sin = Math.sin(r);
+            const tanX = Math.tan(rad(p.skewX));
+            const tanY = Math.tan(rad(p.skewY));
+
+            const scaleX = p.w / p.origW;
+            const scaleY = p.h / p.origH;
+
+            // Right handle: local (origW/2, 0)
+            const rx_s = (p.origW / 2) * scaleX;
+            const ry_s = 0;
+            const rx_k = rx_s + ry_s * tanX;
+            const ry_k = rx_s * tanY + ry_s;
+            const rx_r = rx_k * cos - ry_k * sin;
+            const ry_r = rx_k * sin + ry_k * cos;
+            const rightPt = { x: cx + rx_r * S_view, y: cy + ry_r * S_view };
+
+            // Top handle: local (0, -origH/2)
+            const tx_s = 0;
+            const ty_s = (-p.origH / 2) * scaleY;
+            const tx_k = tx_s + ty_s * tanX;
+            const ty_k = tx_s * tanY + ty_s;
+            const tx_r = tx_k * cos - ty_k * sin;
+            const ty_r = tx_k * sin + ty_k * cos;
+            const topPt = { x: cx + tx_r * S_view, y: cy + ty_r * S_view };
+
+            // Rotate handle: placed at angle theta + 135 degrees, radius 35 on view canvas
+            const rotAng = r + 135 * Math.PI / 180;
+            const rotatePt = { x: cx + Math.cos(rotAng) * 35, y: cy + Math.sin(rotAng) * 35 };
+
+            return { rightPt, topPt, rotatePt, cx, cy, S_view };
+        };
+
+        const onMouseMove = (e: MouseEvent) => {
+            if (!activeHandle) return;
+            const rect = intCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            const { cx, cy, S_view } = getHandleCoords();
+
+            if (activeHandle === 'rotate') {
+                const currentMouseAngle = Math.atan2(my - cy, mx - cx);
+                let deltaAngle = (currentMouseAngle - startMouseAngle) * 180 / Math.PI;
+                let newRot = startRotate + deltaAngle;
+                newRot = ((newRot + 180) % 360 + 360) % 360 - 180;
+                const rotVal = Math.round(newRot * 10) / 10;
+                rotInp.value = rotVal.toString();
+                rotInp.dispatchEvent(new Event('input'));
+            } else {
+                const x_r = (mx - cx) / S_view;
+                const y_r = (my - cy) / S_view;
+
+                const rad = (d: number) => d * Math.PI / 180;
+                const r = rad(-p.rotate);
+                const cos = Math.cos(r);
+                const sin = Math.sin(r);
+
+                const x_k = x_r * cos - y_r * sin;
+                const y_k = x_r * sin + y_r * cos;
+
+                if (activeHandle === 'right') {
+                    const wNew = Math.max(1, Math.round(x_k * 2));
+                    wInp.value = wNew.toString();
+                    wInp.dispatchEvent(new Event('input'));
+
+                    if (Math.abs(x_k) > 0.01) {
+                        const skewYRad = Math.atan(y_k / x_k);
+                        let skewYVal = Math.round((skewYRad * 180 / Math.PI) * 10) / 10;
+                        skewYVal = Math.max(-89, Math.min(89, skewYVal));
+                        skewYInp.value = skewYVal.toString();
+                        skewYInp.dispatchEvent(new Event('input'));
+                    }
+                } else if (activeHandle === 'top') {
+                    const hNew = Math.max(1, Math.round(-y_k * 2));
+                    hInp.value = hNew.toString();
+                    hInp.dispatchEvent(new Event('input'));
+
+                    if (Math.abs(y_k) > 0.01) {
+                        const skewXRad = Math.atan(x_k / y_k);
+                        let skewXVal = Math.round((skewXRad * 180 / Math.PI) * 10) / 10;
+                        skewXVal = Math.max(-89, Math.min(89, skewXVal));
+                        skewXInp.value = skewXVal.toString();
+                        skewXInp.dispatchEvent(new Event('input'));
+                    }
+                }
+            }
+        };
+
+        const onMouseUp = () => {
+            activeHandle = null;
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        intCanvas.addEventListener('mousedown', (e: MouseEvent) => {
+            const rect = intCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            const { rightPt, topPt, rotatePt, cx, cy } = getHandleCoords();
+
+            const dist = (p1: {x:number, y:number}, x: number, y: number) => {
+                return Math.sqrt((p1.x - x)**2 + (p1.y - y)**2);
+            };
+
+            if (dist(rightPt, mx, my) < 8) {
+                activeHandle = 'right';
+            } else if (dist(topPt, mx, my) < 8) {
+                activeHandle = 'top';
+            } else if (dist(rotatePt, mx, my) < 8) {
+                activeHandle = 'rotate';
+                startMouseAngle = Math.atan2(my - cy, mx - cx);
+                startRotate = p.rotate;
+            } else {
+                activeHandle = null;
+            }
+
+            if (activeHandle) {
+                e.preventDefault();
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', onMouseUp);
+            }
+        });
+
+        const drawInteractive = () => {
+            const ctx = intCanvas.getContext('2d');
+            if (!ctx) return;
+
+            const W = intCanvas.width;
+            const H = intCanvas.height;
+            ctx.clearRect(0, 0, W, H);
+
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let i = 20; i < W; i += 20) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, H);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(W, i);
+                ctx.stroke();
+            }
+
+            const { rightPt, topPt, rotatePt, cx, cy, S_view } = getHandleCoords();
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(p.rotate * Math.PI / 180);
+            
+            const tanX = Math.tan(p.skewX * Math.PI / 180);
+            const tanY = Math.tan(p.skewY * Math.PI / 180);
+            ctx.transform(1, tanY, tanX, 1, 0, 0);
+
+            const scaleX = p.w / p.origW;
+            const scaleY = p.h / p.origH;
+            ctx.scale(scaleX * S_view, scaleY * S_view);
+
+            ctx.globalAlpha = 0.6;
+            ctx.drawImage(origCanvas, -p.origW / 2, -p.origH / 2);
+            ctx.restore();
+
+            const corners = [
+                { x: -p.origW/2, y: -p.origH/2 },
+                { x: p.origW/2, y: -p.origH/2 },
+                { x: p.origW/2, y: p.origH/2 },
+                { x: -p.origW/2, y: p.origH/2 }
+            ].map(pt => {
+                const rad = (d: number) => d * Math.PI / 180;
+                const r = rad(p.rotate);
+                const cos = Math.cos(r);
+                const sin = Math.sin(r);
+                const tX = Math.tan(rad(p.skewX));
+                const tY = Math.tan(rad(p.skewY));
+                const sX = p.w / p.origW;
+                const sY = p.h / p.origH;
+
+                const xs = pt.x * sX;
+                const ys = pt.y * sY;
+                const xk = xs + ys * tX;
+                const yk = xs * tY + ys;
+                const xr = xk * cos - yk * sin;
+                const yr = xk * sin + yk * cos;
+
+                return { x: cx + xr * S_view, y: cy + yr * S_view };
+            });
+
+            ctx.beginPath();
+            ctx.moveTo(corners[0].x, corners[0].y);
+            corners.forEach(c => ctx.lineTo(c.x, c.y));
+            ctx.closePath();
+            ctx.strokeStyle = '#00ffcc';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(rightPt.x, rightPt.y);
+            ctx.strokeStyle = '#ff3366';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(topPt.x, topPt.y);
+            ctx.strokeStyle = '#33ccff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, 35, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(rightPt.x, rightPt.y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ff3366';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(topPt.x, topPt.y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#33ccff';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(rotatePt.x, rotatePt.y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffaa00';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.fill();
+            ctx.stroke();
+        };
+
+        const updateMatrixDisplay = () => {
+            const rad = (d: number) => d * Math.PI / 180;
+            const r = rad(p.rotate);
+            const cos = Math.cos(r);
+            const sin = Math.sin(r);
+            const tanX = Math.tan(rad(p.skewX));
+            const tanY = Math.tan(rad(p.skewY));
+            const sx = p.w / p.origW;
+            const sy = p.h / p.origH;
+
+            const a = sx * (cos - tanY * sin);
+            const b = sx * (sin + tanY * cos);
+            const c = sy * (tanX * cos - sin);
+            const d = sy * (tanX * sin + cos);
+
+            matrixContainer.innerHTML = `
+                <div style="font-weight: bold; margin-bottom: 4px; color: #00ffcc;">Transformation Matrix</div>
+                <div style="display: grid; grid-template-columns: repeat(2, 60px); gap: 4px; justify-content: center; font-size: 12px;">
+                    <div style="border-right: 1px solid #444; padding-right: 4px;">${a.toFixed(3)}</div>
+                    <div>${c.toFixed(3)}</div>
+                    <div style="border-right: 1px solid #444; padding-right: 4px;">${b.toFixed(3)}</div>
+                    <div>${d.toFixed(3)}</div>
+                </div>
+            `;
+        };
 
         update();
     }

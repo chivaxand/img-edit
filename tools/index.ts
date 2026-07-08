@@ -7,6 +7,7 @@ export * from './gradient';
 export * from './healing';
 export * from './liquify';
 export * from './pixel';
+export * from './selection-brush';
 export * from './selection-lasso';
 export * from './selection-rect';
 export * from './shapes';

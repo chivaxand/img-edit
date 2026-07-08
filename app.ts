@@ -50,6 +50,7 @@ export interface AppState {
         antsCtx: CanvasRenderingContext2D | null;
         showBorder: boolean;
     };
+    customOverlay?: ((ctx: CanvasRenderingContext2D) => void) | null;
     [key: string]: any;
 }
 
@@ -140,7 +141,8 @@ export const App = {
             antsCanvas: null,
             antsCtx: null,
             showBorder: true
-        }
+        },
+        customOverlay: null
     } as AppState,
     els: {} as Record<string, any>,
     tools: [] as ToolDef[],
@@ -148,6 +150,8 @@ export const App = {
     popup: null as Popup | null,
     FullScreenWorkspace: FullScreenWorkspace,
     InteractiveViewport: InteractiveViewport,
+    spacePressed: false,
+    panState: null as any,
 
     keybinds: {
         bindings: {} as Record<string, Function>,
@@ -206,6 +210,7 @@ export const App = {
     init() {
         this.els.canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
         this.els.ctx = this.els.canvas.getContext('2d')!;
+        this.els.workspace = document.getElementById('workspace') as HTMLDivElement;
         
         // Init Overlay
         this.els.overlay = document.createElement('canvas');
@@ -219,6 +224,48 @@ export const App = {
         this.bindEvents();
         this.actions.resizeCanvas(800, 600);
         this.actions.addEmptyLayer();
+
+        // Mouse wheel zooming
+        this.els.workspace.addEventListener('wheel', (e: WheelEvent) => {
+            e.preventDefault();
+            const tool = this.getTool();
+            if (tool && tool.onWheel && tool.onWheel(e) === true) {
+                return;
+            }
+            const dir = e.deltaY < 0 ? 1 : -1;
+            const rect = this.els.canvas.getBoundingClientRect();
+            const mouseXInCanvas = e.clientX - rect.left;
+            const mouseYInCanvas = e.clientY - rect.top;
+            const pctX = mouseXInCanvas / (rect.width || 1);
+            const pctY = mouseYInCanvas / (rect.height || 1);
+            const oldWidth = rect.width;
+            const oldHeight = rect.height;
+            this.actions.stepZoom(dir);
+            const newRect = this.els.canvas.getBoundingClientRect();
+            const dx = (newRect.width - oldWidth) * pctX;
+            const dy = (newRect.height - oldHeight) * pctY;
+            this.els.workspace.scrollLeft += dx;
+            this.els.workspace.scrollTop += dy;
+        }, { passive: false });
+
+        // Space key dragging
+        window.addEventListener('keydown', (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+            if (e.key === ' ' || e.code === 'Space') {
+                if (!App.spacePressed) {
+                    App.spacePressed = true;
+                    App.els.workspace.style.cursor = 'grab';
+                }
+                e.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', (e: KeyboardEvent) => {
+            if (e.key === ' ' || e.code === 'Space') {
+                App.spacePressed = false;
+                App.els.workspace.style.cursor = '';
+            }
+        });
         
         // Register Global Keybinds
         this.keybinds.register('ctrl+z', () => this.actions.undo());
@@ -236,7 +283,7 @@ export const App = {
             this.keybinds.handle(e);
         });
 
-        this.els.canvas.addEventListener('mousedown', this.events.onMouseDown);
+        this.els.workspace.addEventListener('mousedown', this.events.onMouseDown);
         window.addEventListener('mousemove', this.events.onMouseMove);
         window.addEventListener('mouseup', this.events.onMouseUp);
         this.els.canvas.addEventListener('dblclick', this.events.onDoubleClick);
@@ -455,9 +502,37 @@ export const App = {
     actions: {} as AppActions,
 
     events: {
-        onMouseDown(e: PointerCompatibleEvent) { const t = App.getTool(); if (t && t.onMouseDown) t.onMouseDown(e); },
-        onMouseMove(e: PointerCompatibleEvent) { const t = App.getTool(); if (t && t.onMouseMove) t.onMouseMove(e); },
-        onMouseUp(e: PointerCompatibleEvent) { 
+        onMouseDown(e: PointerCompatibleEvent) {
+            const t = App.getTool();
+            if (t && t.interceptPan && t.interceptPan(e) === true) {
+                // Let tool handle
+            } else if (e.button === 1 || App.spacePressed) {
+                e.preventDefault();
+                App.els.workspace.style.cursor = 'grabbing';
+                App.panState = { active: true, startX: e.clientX, startY: e.clientY, scrollStartX: App.els.workspace.scrollLeft, scrollStartY: App.els.workspace.scrollTop };
+                return;
+            }
+            if (e.target === App.els.canvas) {
+                if (t && t.onMouseDown) t.onMouseDown(e);
+            }
+        },
+        onMouseMove(e: PointerCompatibleEvent) {
+            if (App.panState && App.panState.active) {
+                const dx = e.clientX - App.panState.startX;
+                const dy = e.clientY - App.panState.startY;
+                App.els.workspace.scrollLeft = App.panState.scrollStartX - dx;
+                App.els.workspace.scrollTop = App.panState.scrollStartY - dy;
+                return;
+            }
+            const t = App.getTool();
+            if (t && t.onMouseMove) t.onMouseMove(e);
+        },
+        onMouseUp(e: PointerCompatibleEvent) {
+            if (App.panState && App.panState.active) {
+                App.panState.active = false;
+                App.els.workspace.style.cursor = App.spacePressed ? 'grab' : '';
+                return;
+            }
             const t = App.getTool(); 
             if (t && t.onMouseUp) t.onMouseUp(e);
             if (App.state.selection.active) {
@@ -649,6 +724,11 @@ export const App = {
                         }
                     }
                 }
+            }
+
+            // Render any active custom overlay (e.g. static grid lines)
+            if (App.state.customOverlay) {
+                App.state.customOverlay(ctx);
             }
 
             // Render active tool overlay (e.g. transform handles)

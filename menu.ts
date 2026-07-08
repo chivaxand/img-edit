@@ -2,6 +2,7 @@ import { App } from '~/app';
 import { Filters } from '~/filters';
 import { JpegExport } from '~/actions/jpeg-export';
 import { GifExport } from '~/actions/gif-export';
+import { SvgExport } from '~/actions/svg-export';
 
 export interface MenuItemDef {
     label?: string;
@@ -21,6 +22,7 @@ export const Menu = {
                 { label: 'Open...', action: () => document.getElementById('file-upload')!.click() },
                 { label: 'Export PNG', action: () => App.actions.download() },
                 { label: 'Export JPEG...', action: () => JpegExport.open() },
+                { label: 'Export SVG...', action: () => SvgExport.open() },
                 { label: 'Export Base64', action: () => App.actions.exportBase64() },
                 { label: 'Export GIF...', action: () => GifExport.open() }
             ]

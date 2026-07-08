@@ -651,13 +651,13 @@ export const GradientGeneratorWorkspace = {
         // --- Append Channels Plot Canvas below viewport in Left Panel ---
         const channelsPlotContainer = UI.createNode('div', {
             className: 'gradient-channels-plot-wrapper',
-            style: 'height: 85px; border-top: 1px solid #2d2d2d; background: #121212; padding: 4px; box-sizing: border-box;'
+            style: 'height: 200px; border-top: 1px solid #2d2d2d; background: #121212; padding: 4px; box-sizing: border-box;'
         });
 
         const channelsCanvas = UI.createNode('canvas', {
             className: 'gradient-channels-canvas',
             width: 500,
-            height: 80,
+            height: 255,
             style: 'width: 100%; height: 100%; display: block;'
         }) as HTMLCanvasElement;
 
@@ -681,8 +681,25 @@ export const GradientGeneratorWorkspace = {
                 ctx.stroke();
             }
 
-            const channelColors = ['#ff4d4d', '#2ecc71', '#3498db', '#f1c40f'];
             ctx.lineWidth = 1.8;
+
+            // Draw grayscale luminance line first (back layer)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.beginPath();
+            for (let x = 0; x < w; x++) {
+                const t = x / (w - 1 || 1);
+                const rgba = getGradientColor(t);
+                const gray = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2];
+                const y = h - (gray / 255) * h;
+                if (x === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+
+            const channelColors = ['#ff4d4d', '#2ecc71', '#3498db', '#f1c40f'];
 
             for (let ch = 0; ch < 4; ch++) {
                 ctx.strokeStyle = channelColors[ch];
@@ -1542,7 +1559,7 @@ export const GradientGeneratorWorkspace = {
             .gradient-editor-bar-wrapper { background: #1e1e1e; border-bottom: 1px solid #333; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
             .gradient-bar-container { position: relative; height: 30px; border: 1px solid #333; border-radius: 4px; overflow: visible; background-image: linear-gradient(45deg, #1d1d1d 25%, transparent 25%), linear-gradient(-45deg, #1d1d1d 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1d1d1d 75%), linear-gradient(-45deg, transparent 75%, #1d1d1d 75%); background-size: 10px 10px; background-position: 0 0, 0 5px, 5px -5px, -5px 0px; }
             .gradient-bar-display-canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-            .gradient-stops-track { position: relative; height: 24px; margin: 0 8px; background: #252526; border: 1px solid #333; border-radius: 3px; cursor: crosshair; }
+            .gradient-stops-track { position: relative; height: 24px; margin: 0; background: #252526; border: 1px solid #333; border-radius: 3px; cursor: crosshair; }
             .gradient-stop-marker { position: absolute; top: 4px; width: 12px; height: 12px; transform: translateX(-50%) rotate(45deg); cursor: pointer; border: 1.5px solid #aaa; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); transition: border-color 0.1s, transform 0.1s; }
             .gradient-stop-marker:hover { border-color: #fff; transform: translateX(-50%) rotate(45deg) scale(1.1); }
             .gradient-stop-marker.selected { border-color: #007acc; box-shadow: 0 0 4px #007acc; transform: translateX(-50%) rotate(45deg) scale(1.2); z-index: 10; }

@@ -3,6 +3,7 @@ import { UI } from '~/ui';
 import { Filters } from '~/filters';
 import { JpegExport } from './jpeg-export';
 import { GifExport } from './gif-export';
+import { SvgExport } from './svg-export';
 
 export interface IScriptAPI {
     resizeCanvas(w: number, h: number): void;
@@ -34,6 +35,16 @@ export interface IScriptAPI {
     exportPNG(): void;
     exportJPEG(quality: number, bgColor: string): void;
     exportGIF(loop: number, frames: Array<{ id: number; include: boolean; delay: number }>): void;
+    exportSVG(settings: {
+        width?: number;
+        height?: number;
+        unit?: 'mm' | 'cm' | 'in' | 'mil' | 'px';
+        dpi?: number;
+        keepRatio?: boolean;
+        format?: 'image/png' | 'image/jpeg';
+        quality?: number;
+        bgColor?: string;
+    }): void;
 }
 
 export const ScriptAPI: IScriptAPI = {
@@ -344,6 +355,20 @@ export const ScriptAPI: IScriptAPI = {
             };
         });
         GifExport.generate();
+    },
+
+    exportSVG(settings: {
+        width?: number;
+        height?: number;
+        unit?: 'mm' | 'cm' | 'in' | 'mil' | 'px';
+        dpi?: number;
+        keepRatio?: boolean;
+        format?: 'image/png' | 'image/jpeg';
+        quality?: number;
+        bgColor?: string;
+    }) {
+        Object.assign(SvgExport.settings, settings);
+        SvgExport.generate();
     }
 };
 

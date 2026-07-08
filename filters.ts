@@ -207,6 +207,16 @@ export const Filters = {
         };
 
         const p = App.popup!;
+        
+        // Clear overlay on close
+        const originalClose = p.close.bind(p);
+        p.close = () => {
+            App.state.customOverlay = null;
+            p.close = originalClose;
+            originalClose();
+            App.render();
+        };
+
         p.setHtml(`
             <h2>${def.name}</h2>
             <div id="filter-ui-root"></div>

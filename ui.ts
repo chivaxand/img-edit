@@ -59,6 +59,19 @@ interface UIPaletteSelectOpts {
     [k: string]: any;
 }
 
+interface UIAngleOpts {
+    label: string | null;
+    value: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    mode?: '360' | '180';
+    onInput?: (val: number) => void;
+    onChange?: (val: number) => void;
+    style?: string | Partial<CSSStyleDeclaration>;
+    [k: string]: any;
+}
+
 interface UIRadioOption<T = any> {
     value: T;
     label?: string;
@@ -118,6 +131,7 @@ interface UIInterface {
     createButton(opts: UIButtonOpts): HTMLButtonElement;
     createSlider(opts: UISliderOpts): { container: HTMLDivElement; input: HTMLInputElement };
     createSliderRow(opts: UISliderOpts): HTMLElement;
+    createAngleRow(opts: UIAngleOpts): HTMLElement;
     createCheckbox(opts: UICheckboxOpts): HTMLLabelElement;
     createHint(text: string, props?: UIProps): HTMLElement;
     createSelectRow<T = any>(opts: UISelectOpts<T>): HTMLElement;
@@ -199,6 +213,92 @@ export const UI: UIInterface = {
 
     createSliderRow(opts: UISliderOpts): HTMLElement {
         return this.createRow(opts.label || null, this.createSlider(opts).container);
+    },
+
+    createAngleRow(opts: UIAngleOpts): HTMLElement {
+        const min = opts.min ?? 0;
+        const max = opts.max ?? 360;
+        const step = opts.step ?? 1;
+        const mode = opts.mode ?? '360';
+        let currentVal = opts.value;
+        const slider = this.createSlider({
+            min, max, step, value: currentVal,
+            onInput: (v: string) => {
+                currentVal = parseFloat(v);
+                draw();
+                if (opts.onInput) opts.onInput(currentVal);
+            },
+            onChange: (v: string) => {
+                currentVal = parseFloat(v);
+                draw();
+                if (opts.onChange) opts.onChange(currentVal);
+            }
+        });
+        const cvs = this.createNode('canvas', { width: 24, height: 24, style: 'margin-left: 8px; cursor: ew-resize; border-radius: 50%; background: #222; border: 1px solid #555; flex-shrink: 0;' }) as HTMLCanvasElement;
+        const ctx = cvs.getContext('2d');
+        const draw = () => {
+            if (!ctx) return;
+            ctx.clearRect(0, 0, 24, 24);
+            ctx.beginPath();
+            ctx.arc(12, 12, 10, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            const rad = currentVal * Math.PI / 180;
+            const dx = Math.cos(rad) * 10;
+            const dy = Math.sin(rad) * 10;
+            ctx.beginPath();
+            if (mode === '180') {
+                ctx.moveTo(12 - dx, 12 - dy);
+            } else {
+                ctx.moveTo(12, 12);
+            }
+            ctx.lineTo(12 + dx, 12 + dy);
+            ctx.strokeStyle = '#0f0';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        };
+        draw();
+        let isDragging = false;
+        let startX = 0, startY = 0, startVal = 0;
+        const onMove = (e: MouseEvent) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = startY - e.clientY; 
+            let delta = (dx + dy) * 0.5;
+            let newVal = startVal + delta;
+            if (newVal > max) newVal = max;
+            if (newVal < min) newVal = min;
+            newVal = Math.round(newVal / step) * step;
+            if (newVal !== currentVal) {
+                currentVal = newVal;
+                slider.input.value = String(currentVal);
+                slider.input.dispatchEvent(new Event('input'));
+            }
+        };
+        const onUp = () => {
+            if (isDragging) {
+                isDragging = false;
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+                if (opts.onChange) opts.onChange(currentVal);
+            }
+        };
+        cvs.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startVal = currentVal;
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+            e.preventDefault();
+        });
+        const row = this.createRow(opts.label || null, this.createNode('div', { style: 'display: flex; align-items: center; width: 100%;' }, slider.container, cvs));
+        if (opts.style) {
+            if (typeof opts.style === 'string') row.style.cssText = opts.style;
+            else Object.assign(row.style, opts.style);
+        }
+        return row;
     },
     
     createCheckbox({ label, value, onChange, props = {} }: UICheckboxOpts): HTMLLabelElement {

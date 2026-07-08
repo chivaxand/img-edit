@@ -2,6 +2,7 @@ import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Lib } from '~/libs/index';
+import { PaletteName } from '~/libs/plot';
 
 Filters.register('spectral', {
     name: 'Spectral Analysis',
@@ -19,12 +20,14 @@ Filters.register('spectral', {
             analyzeDiff: false,     // Pre-process with Edge Detection
             logScale: true,         // Use Log Magnitude
             contrast: 1.0,          // Visual contrast
-            windowType: 'blackman', // 'none', 'hann', 'hamming', 'blackman', 'kaiser'
+            cmap: 'ironbow' as PaletteName, // Colormap
+            windowType: 'hamming',  // 'none', 'hann', 'hamming', 'blackman', 'kaiser'
             kaiserBeta: 6.0,        // Kaiser window beta parameter
             circularPlot: false,    // Circular radar plot for Polar mode
             showJpegGrid: false,    // Overlay Grid markers
             gridW: 8,               // Grid Block Width (default 8 for JPEG)
-            gridH: 8                // Grid Block Height
+            gridH: 8,               // Grid Block Height
+            angleMarker: 0          // Guide line for angle detection
         };
 
         const update = () => {
@@ -33,6 +36,7 @@ Filters.register('spectral', {
             const isKaiser = state.windowType === 'kaiser';
             
             circularCheckbox.style.display = isPolar ? 'flex' : 'none';
+            angleRow.style.display = isPolar ? 'flex' : 'none';
             jpegCheckbox.style.display = isSpectrum ? 'flex' : 'none';
             gridConfig.style.display = (isSpectrum && state.showJpegGrid) ? 'block' : 'none';
             betaRow.style.display = isKaiser ? 'flex' : 'none';
@@ -67,6 +71,12 @@ Filters.register('spectral', {
             ],
             value: state.channel,
             onChange: (v: any) => { state.channel = v; update(); }
+        }));
+
+        container.appendChild(UI.createPaletteSelectRow({
+            label: 'Colormap',
+            value: state.cmap,
+            onChange: (v: PaletteName) => { state.cmap = v; update(); }
         }));
 
         container.appendChild(UI.createSliderRow({
@@ -111,6 +121,15 @@ Filters.register('spectral', {
             onChange: (v: any) => { state.circularPlot = v; update(); }
         });
         container.appendChild(circularCheckbox);
+
+        const angleRow = UI.createAngleRow({
+            style: 'display:none',
+            label: 'Angle Guide',
+            value: state.angleMarker,
+            min: 0, max: 180, step: 1, mode: '180',
+            onInput: (v: number) => { state.angleMarker = v; update(); }
+        });
+        container.appendChild(angleRow);
 
         const jpegCheckbox = UI.createCheckbox({
             style: 'display:none',
@@ -247,25 +266,26 @@ Filters.register('spectral', {
 
         // Render Output
         if (params.mode === 'spectrum') {
-            this.renderSpectrum2D(data, mag, w, h, maxVal, params.contrast, params.showJpegGrid, params.gridW, params.gridH);
+            this.renderSpectrum2D(data, mag, w, h, maxVal, params.contrast, params.showJpegGrid, params.gridW, params.gridH, params.cmap);
         } 
         else if (params.mode === 'radial') {
             this.renderRadialProfile(data, mag, w, h, maxVal);
         } 
         else if (params.mode === 'polar') {
-            this.renderPolarTransform(data, mag, w, h, maxVal, params.contrast, params.circularPlot);
+            this.renderPolarTransform(data, mag, w, h, maxVal, params.contrast, params.circularPlot, params.cmap, params.angleMarker);
         }
     },
 
     // --- Renderers ---
 
-    renderSpectrum2D(this: any, data: Uint8ClampedArray, mag: Float32Array, w: number, h: number, maxVal: number, contrast: number, showGrid: boolean, gridW: number, gridH: number) {
+    renderSpectrum2D(this: any, data: Uint8ClampedArray, mag: Float32Array, w: number, h: number, maxVal: number, contrast: number, showGrid: boolean, gridW: number, gridH: number, cmap: PaletteName) {
         data.fill(20); 
         const scale = (1.0 / (maxVal || 1)) * contrast;
         const len = w * h;
+        const pal = cmap || 'ironbow';
         for (let i = 0; i < len; i++) {
             let v = mag[i] * scale;
-            const rgba = Lib.plot.getColor(v, 'hot');
+            const rgba = Lib.plot.getColor(v, pal);
             const idx = i * 4;
             data[idx]   = rgba[0]; 
             data[idx+1] = rgba[1]; 
@@ -363,7 +383,7 @@ Filters.register('spectral', {
         this.drawDashedLine(data, w, h, safeX, pad, safeX, h - pad, [100, 100, 100]);
     },
 
-    renderPolarTransform(this: any, data: Uint8ClampedArray, mag: Float32Array, w: number, h: number, maxVal: number, contrast: number, isCircular: boolean) {
+    renderPolarTransform(this: any, data: Uint8ClampedArray, mag: Float32Array, w: number, h: number, maxVal: number, contrast: number, isCircular: boolean, cmap: PaletteName, angleMarker?: number) {
         const bgVal = 26;
         for(let i=0; i<data.length; i+=4) {
             data[i] = bgVal; data[i+1] = bgVal; data[i+2] = bgVal; data[i+3] = 255;
@@ -377,12 +397,12 @@ Filters.register('spectral', {
         let maxAngleSum = 0;
 
         const scale = (1.0 / (maxVal || 1)) * contrast;
+        const pal = cmap || 'ironbow';
 
         // Iterate Polar Output Pixels
         for (let px = 0; px < polarW; px++) {
-            // angle shifted to match image pixels
             // Scans 180 degrees (FFT symmetry covers the opposite side)
-            const angle = (px / polarW) * Math.PI + Math.PI / 2;
+            const angle = (px / polarW) * Math.PI;
             const cos = Math.cos(angle);
             const sin = Math.sin(angle);
             let colSum = 0;
@@ -399,7 +419,7 @@ Filters.register('spectral', {
 
                 const val = this.sampleBilinear(mag, w, h, srcX, srcY);
                 let dispVal = val * scale;
-                const rgba = Lib.plot.getColor(dispVal, 'hot');
+                const rgba = Lib.plot.getColor(dispVal, pal);
                 
                 const idx = (py * w + px) * 4;
                 data[idx]   = rgba[0];
@@ -414,9 +434,9 @@ Filters.register('spectral', {
         }
 
         if (isCircular) {
-            this.drawRadarGraph(data, w, h, angleSums, maxAngleSum);
+            this.drawRadarGraph(data, w, h, angleSums, maxAngleSum, angleMarker);
         } else {
-            this.drawLinearGraph(data, w, h, angleSums, maxAngleSum);
+            this.drawLinearGraph(data, w, h, angleSums, maxAngleSum, angleMarker);
         }
     },
 
@@ -472,7 +492,7 @@ Filters.register('spectral', {
         });
     },
 
-    drawLinearGraph(this: any, data: Uint8ClampedArray, w: number, h: number, values: Float32Array, maxVal: number) {
+    drawLinearGraph(this: any, data: Uint8ClampedArray, w: number, h: number, values: Float32Array, maxVal: number, angleMarker?: number) {
         const graphColor = [0, 255, 0]; 
         const baseLine = h - 1;
         let prevY = -1;
@@ -493,9 +513,14 @@ Filters.register('spectral', {
                 this.drawDashedLine(data, w, h, x, 0, x, h, [80, 80, 80]);
             }
         }
+        
+        if (angleMarker !== undefined) {
+            const markerX = Math.round((angleMarker / 180) * w);
+            this.drawLine(data, w, h, markerX, 0, markerX, h, [255, 255, 0]);
+        }
     },
 
-    drawRadarGraph(this: any, data: Uint8ClampedArray, w: number, h: number, values: Float32Array, maxVal: number) {
+    drawRadarGraph(this: any, data: Uint8ClampedArray, w: number, h: number, values: Float32Array, maxVal: number, angleMarker?: number) {
         const cx = w / 2;
         const cy = h / 2;
         const maxRadius = Math.min(cx, cy) - 10;
@@ -547,6 +572,13 @@ Filters.register('spectral', {
         
         if (startX !== -1) {
             this.drawLine(data, w, h, prevX, prevY, startX, startY, lineColor);
+        }
+
+        if (angleMarker !== undefined) {
+            const rad = angleMarker * Math.PI / 180;
+            const dx = Math.cos(rad) * maxRadius;
+            const dy = Math.sin(rad) * maxRadius;
+            this.drawLine(data, w, h, cx - dx, cy - dy, cx + dx, cy + dy, [255, 255, 0]);
         }
     },
 

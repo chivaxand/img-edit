@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
+import { drawActiveBrushCircle } from './basics';
 
 App.registerTool({
     id: 'liquify',
@@ -13,6 +14,10 @@ App.registerTool({
     origData: null as Uint8ClampedArray | null,
     disX: null as Float32Array | null,
     disY: null as Float32Array | null,
+
+    drawUI() {
+        drawActiveBrushCircle(this.settings.size);
+    },
 
     onSelect(panel: HTMLElement) {
         panel.appendChild(UI.createSliderRow({ label: 'Size', min: 10, max: 200, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));

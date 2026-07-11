@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
+import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
 
 App.registerTool({
     id: 'clone',
@@ -75,25 +76,7 @@ App.registerTool({
 
         // Prepare Brush Mask Canvas
         const size = this.settings.size;
-        this.brushCanvas = document.createElement('canvas');
-        this.brushCanvas.width = size;
-        this.brushCanvas.height = size;
-        const bCtx = this.brushCanvas.getContext('2d')!;
-        
-        const r = size / 2;
-        const grad = bCtx.createRadialGradient(r, r, 0, r, r, r);
-        
-        // Hardness maps directly to the inner solid color stop (0% = 0, 100% = 1)
-        const stop0 = Math.max(0, Math.min(1, this.settings.hardness / 100));
-        
-        grad.addColorStop(0, 'rgba(0,0,0,1)');
-        if (stop0 < 1 && stop0 > 0) grad.addColorStop(stop0, 'rgba(0,0,0,1)');
-        if (stop0 < 1) grad.addColorStop(1, 'rgba(0,0,0,0)');
-        
-        bCtx.fillStyle = grad;
-        bCtx.beginPath();
-        bCtx.arc(r, r, r, 0, Math.PI * 2);
-        bCtx.fill();
+        this.brushCanvas = createBrushCanvas(size, this.settings.hardness);
 
         // Prepare Temporary Stamping Canvas
         this.tempCanvas = document.createElement('canvas');
@@ -189,18 +172,7 @@ App.registerTool({
         if (isInitial) {
             stampAt(p1.x, p1.y);
         } else {
-            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            if (dist > 0) {
-                const dx = (p2.x - p1.x) / dist;
-                const dy = (p2.y - p1.y) / dist;
-                
-                let d = this.distanceAccumulator;
-                while (d <= dist) {
-                    stampAt(p1.x + dx * d, p1.y + dy * d);
-                    d += spacingPx;
-                }
-                this.distanceAccumulator = d - dist; // Save the leftover distance for the next frame
-            }
+            this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
         }
         
         // If selection is active, mask the segment scratchpad and merge to layer
@@ -258,5 +230,7 @@ App.registerTool({
             
             ctx.restore();
         }
+
+        drawActiveBrushCircle(this.settings.size);
     }
 });

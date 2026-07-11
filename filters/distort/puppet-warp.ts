@@ -36,25 +36,26 @@ Filters.register('distort-puppet-warp', {
         // State variables
         let pins: WarpPin[] = [];
         let selectedPinIds = new Set<string>();
-        let selectedPinId: string | null = null; // Currently editing single pin
+        let selectedPinId: string | null = null;
+        let hoveredPinId: string | null = null;
         let activeTool: 'drag' | 'add' | 'remove' = 'add';
         let mode: 'rigid' | 'similarity' | 'affine' = 'rigid';
-        let alpha = 1.0;
-        let gridSize = 25;
+        let alpha = 3.0;
+        let gridSize = 40;
         let showMesh = true;
         let showHeatmap = false;
         let showPins = true;
         let interpolationMode: 'lanczos' | 'high' | 'low' | 'pixelated' = 'lanczos';
 
         let isDraggingPin = false;
-        let isAdjustingSlider = false; // Flag to lock fast renderer on input and run slow resampler on release
+        let isAdjustingSlider = false;
         let hasDragged = false;
         let activeDragPinId: string | null = null;
         const dragStartPositions: Record<string, { x: number; y: number }> = {};
         let dragStartMouseX = 0;
         let dragStartMouseY = 0;
 
-        // Local history manager (50-steps local undo/redo stack)
+        // Local history manager
         const historyStack: string[] = [];
         const redoStack: string[] = [];
         const maxHistory = 50;
@@ -79,6 +80,7 @@ Filters.register('distort-puppet-warp', {
                 pins = JSON.parse(historyStack[historyStack.length - 1]);
                 selectedPinIds.clear();
                 selectedPinId = null;
+                hoveredPinId = null;
                 recalculateAndRender();
                 updateSidebarFields();
             }
@@ -132,8 +134,10 @@ Filters.register('distort-puppet-warp', {
                 pins = pins.filter(p => !selectedPinIds.has(p.id));
                 selectedPinIds.clear();
                 selectedPinId = null;
+                hoveredPinId = null;
                 saveLocalState();
                 recalculateAndRender();
+                updateCursor(0, 0, false);
                 e.preventDefault();
             } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
                 undoLocal();
@@ -148,11 +152,10 @@ Filters.register('distort-puppet-warp', {
         };
         document.addEventListener('keydown', keyHandler);
 
-        // Triangular grid structures
-        let vRest: Array<Array<{ x: number; y: number }>> = [];
-        let vDeformed: Array<Array<{ x: number; y: number }>> = [];
-        let cols = 0;
-        let rows = 0;
+        // Alpha-Contour Triangle mesh structures
+        let vRest: Array<{ id: number; x: number; y: number }> = [];
+        let vDeformed: Array<{ id: number; x: number; y: number }> = [];
+        let triangles: Array<[number, number, number]> = [];
 
         const srcCtx = origCanvas.getContext('2d')!;
         const srcData = srcCtx.getImageData(0, 0, fullW, fullH);
@@ -165,8 +168,6 @@ Filters.register('distort-puppet-warp', {
             if (y < 0) y = 0; else if (y >= fullH) y = fullH - 1;
             return src8[(y * fullW + x) * 4 + c];
         };
-
-        // --- Custom High Quality Software Resampler Kernels ---
 
         const sampleBilinear = (u: number, v: number, c: number) => {
             const x0 = Math.floor(u);
@@ -245,23 +246,95 @@ Filters.register('distort-puppet-warp', {
             return Math.max(0, Math.min(255, val));
         };
 
-        const buildRestGrid = () => {
-            cols = gridSize;
-            rows = Math.max(4, Math.round(gridSize * (fullH / fullW)));
-            vRest = [];
-            for (let c = 0; c <= cols; c++) {
-                vRest[c] = [];
-                const tx = c / cols;
-                const x = tx * fullW;
-                for (let r = 0; r <= rows; r++) {
-                    const ty = r / rows;
-                    const y = ty * fullH;
-                    vRest[c][r] = { x, y };
+        const buildMesh = () => {
+            const cols = gridSize;
+            const rows = Math.max(4, Math.round(gridSize * (fullH / fullW)));
+            const cellW = fullW / cols;
+            const cellH = fullH / rows;
+            
+            const activeCells = Array.from({length: cols}, () => new Array(rows).fill(false));
+            
+            const checkCellAlpha = (c: number, r: number) => {
+                const startX = Math.floor(c * cellW);
+                const endX = Math.min(fullW, Math.ceil((c + 1) * cellW));
+                const startY = Math.floor(r * cellH);
+                const endY = Math.min(fullH, Math.ceil((r + 1) * cellH));
+                
+                const step = 3;
+                for (let y = startY; y < endY; y += step) {
+                    for (let x = startX; x < endX; x += step) {
+                        const alphaIdx = (y * fullW + x) * 4 + 3;
+                        if (src8[alphaIdx] > 5) return true;
+                    }
                 }
+                return false;
+            };
+
+            for (let c = 0; c < cols; c++) {
+                for (let r = 0; r < rows; r++) {
+                    activeCells[c][r] = checkCellAlpha(c, r);
+                }
+            }
+
+            const dilatedCells = Array.from({length: cols}, () => new Array(rows).fill(false));
+            for (let c = 0; c < cols; c++) {
+                for (let r = 0; r < rows; r++) {
+                    if (activeCells[c][r]) {
+                        for (let dc = -1; dc <= 1; dc++) {
+                            for (let dr = -1; dr <= 1; dr++) {
+                                const nc = c + dc, nr = r + dr;
+                                if (nc >= 0 && nc < cols && nr >= 0 && nr < rows) {
+                                    dilatedCells[nc][nr] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            vRest = [];
+            triangles = [];
+            const vertexMap = new Map<string, number>();
+
+            const getVertexId = (c: number, r: number) => {
+                const key = `${c},${r}`;
+                if (vertexMap.has(key)) return vertexMap.get(key)!;
+                const id = vRest.length;
+                vRest.push({ id, x: (c / cols) * fullW, y: (r / rows) * fullH });
+                vertexMap.set(key, id);
+                return id;
+            };
+
+            let hasAny = false;
+            for (let c = 0; c < cols; c++) {
+                for (let r = 0; r < rows; r++) {
+                    if (dilatedCells[c][r]) {
+                        hasAny = true;
+                        const v00 = getVertexId(c, r);
+                        const v10 = getVertexId(c + 1, r);
+                        const v11 = getVertexId(c + 1, r + 1);
+                        const v01 = getVertexId(c, r + 1);
+
+                        triangles.push([v00, v10, v01]);
+                        triangles.push([v10, v11, v01]);
+                    }
+                }
+            }
+
+            if (!hasAny) {
+                 for (let c = 0; c < cols; c++) {
+                    for (let r = 0; r < rows; r++) {
+                        const v00 = getVertexId(c, r);
+                        const v10 = getVertexId(c + 1, r);
+                        const v11 = getVertexId(c + 1, r + 1);
+                        const v01 = getVertexId(c, r + 1);
+                        triangles.push([v00, v10, v01]);
+                        triangles.push([v10, v11, v01]);
+                    }
+                 }
             }
         };
 
-        // barycentric coordinates helper to evaluate which source triangle contains coordinate 
         const checkTriangleBarycentric = (
             x: number, y: number,
             q0: { x: number; y: number }, q1: { x: number; y: number }, q2: { x: number; y: number },
@@ -274,7 +347,7 @@ Filters.register('distort-puppet-warp', {
             const w1 = ((q2.y - q0.y) * (x - q2.x) + (q0.x - q2.x) * (y - q2.y)) / denom;
             const w2 = 1.0 - w0 - w1;
 
-            const eps = -1e-3; // slight overlap epsilon to prevent boundary leaks
+            const eps = -1e-3;
             if (w0 >= eps && w1 >= eps && w2 >= eps) {
                 const u = w0 * p0.x + w1 * p1.x + w2 * p2.x;
                 const v = w0 * p0.y + w1 * p1.y + w2 * p2.y;
@@ -283,103 +356,70 @@ Filters.register('distort-puppet-warp', {
             return null;
         };
 
-        // maps a visual clicked point back into the pristine source context
         const getOriginalCoords = (clickX: number, clickY: number) => {
             if (pins.length === 0 || vDeformed.length === 0) {
                 return { x: clickX, y: clickY };
             }
 
-            for (let c = 0; c < cols; c++) {
-                for (let r = 0; r < rows; r++) {
-                    // Triangle 1
-                    const p0_1 = vRest[c][r];
-                    const p1_1 = vRest[c + 1][r];
-                    const p2_1 = vRest[c][r + 1];
+            for (const [i0, i1, i2] of triangles) {
+                const p0 = vRest[i0], p1 = vRest[i1], p2 = vRest[i2];
+                const q0 = vDeformed[i0], q1 = vDeformed[i1], q2 = vDeformed[i2];
 
-                    const q0_1 = vDeformed[c][r];
-                    const q1_1 = vDeformed[c + 1][r];
-                    const q2_1 = vDeformed[c][r + 1];
-
-                    let mapped = checkTriangleBarycentric(clickX, clickY, q0_1, q1_1, q2_1, p0_1, p1_1, p2_1);
-                    if (mapped) return mapped;
-
-                    // Triangle 2
-                    const p0_2 = vRest[c + 1][r];
-                    const p1_2 = vRest[c + 1][r + 1];
-                    const p2_2 = vRest[c][r + 1];
-
-                    const q0_2 = vDeformed[c + 1][r];
-                    const q1_2 = vDeformed[c + 1][r + 1];
-                    const q2_2 = vDeformed[c][r + 1];
-
-                    mapped = checkTriangleBarycentric(clickX, clickY, q0_2, q1_2, q2_2, p0_2, p1_2, p2_2);
-                    if (mapped) return mapped;
-                }
+                const mapped = checkTriangleBarycentric(clickX, clickY, q0, q1, q2, p0, p1, p2);
+                if (mapped) return mapped;
             }
             return { x: clickX, y: clickY };
         };
 
         const recalculateAndRender = () => {
-            vDeformed = [];
-            for (let c = 0; c <= cols; c++) {
-                vDeformed[c] = [];
-                for (let r = 0; r <= rows; r++) {
-                    const pt = vRest[c][r];
-                    // 1. Solve the base automatic deformation (MLS formulation)
-                    const baseDef = solveMLS(pt.x, pt.y, pins, mode, alpha);
+            vDeformed = vRest.map(pt => {
+                const baseDef = solveMLS(pt.x, pt.y, pins, mode, alpha);
 
-                    // 2. Blend the manual twist rotations and local expansions around the control pins smoothly
-                    if (pins.length === 0) {
-                        vDeformed[c][r] = baseDef;
-                        continue;
-                    }
-
-                    const weights = new Float64Array(pins.length);
-                    let sumW = 0;
-                    const eps = 1e-6;
-
-                    for (let i = 0; i < pins.length; i++) {
-                        const pin = pins[i];
-                        const dx = pin.x - pt.x;
-                        const dy = pin.y - pt.y;
-                        const distSq = dx * dx + dy * dy;
-                        if (distSq < eps) {
-                            weights[i] = 1e12; // massive pull directly on point
-                        } else {
-                            weights[i] = pin.stiffness / Math.pow(distSq, alpha);
-                        }
-                        sumW += weights[i];
-                    }
-
-                    let finalX = 0;
-                    let finalY = 0;
-
-                    for (let i = 0; i < pins.length; i++) {
-                        const pin = pins[i];
-                        const normW = weights[i] / sumW;
-
-                        // Calculate relative displacement from the auto-solved coordinate frame
-                        const dx = baseDef.x - pin.targetX;
-                        const dy = baseDef.y - pin.targetY;
-
-                        // Apply the manual twist angle
-                        const rad = (pin.rotation * Math.PI) / 180;
-                        const cosR = Math.cos(rad);
-                        const sinR = Math.sin(rad);
-
-                        // Rotate & local expansion scaling offsets
-                        const rotatedX = (dx * cosR - dy * sinR) * pin.scale;
-                        const rotatedY = (dx * sinR + dy * cosR) * pin.scale;
-
-                        finalX += normW * (pin.targetX + rotatedX);
-                        finalY += normW * (pin.targetY + rotatedY);
-                    }
-
-                    vDeformed[c][r] = { x: finalX, y: finalY };
+                if (pins.length === 0) {
+                    return { id: pt.id, x: baseDef.x, y: baseDef.y };
                 }
-            }
 
-            // Realtime dragging or sliding renders fast via GPU. Pause/Release fires slow high-quality filters.
+                const weights = new Float64Array(pins.length);
+                let sumW = 0;
+                const eps = 1e-6;
+
+                for (let i = 0; i < pins.length; i++) {
+                    const pin = pins[i];
+                    const dx = pin.x - pt.x;
+                    const dy = pin.y - pt.y;
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq < eps) {
+                        weights[i] = 1e12;
+                    } else {
+                        weights[i] = pin.stiffness / Math.pow(distSq, alpha);
+                    }
+                    sumW += weights[i];
+                }
+
+                let finalX = 0;
+                let finalY = 0;
+
+                for (let i = 0; i < pins.length; i++) {
+                    const pin = pins[i];
+                    const normW = weights[i] / sumW;
+
+                    const dx = baseDef.x - pin.targetX;
+                    const dy = baseDef.y - pin.targetY;
+
+                    const rad = (pin.rotation * Math.PI) / 180;
+                    const cosR = Math.cos(rad);
+                    const sinR = Math.sin(rad);
+
+                    const rotatedX = (dx * cosR - dy * sinR) * pin.scale;
+                    const rotatedY = (dx * sinR + dy * cosR) * pin.scale;
+
+                    finalX += normW * (pin.targetX + rotatedX);
+                    finalY += normW * (pin.targetY + rotatedY);
+                }
+
+                return { id: pt.id, x: finalX, y: finalY };
+            });
+
             const useFastDrag = isDraggingPin || isAdjustingSlider;
 
             if (useFastDrag) {
@@ -390,21 +430,10 @@ Filters.register('distort-puppet-warp', {
                 if (pins.length === 0) {
                     bbCtx.drawImage(origCanvas, 0, 0);
                 } else {
-                    for (let c = 0; c < cols; c++) {
-                        for (let r = 0; r < rows; r++) {
-                            const p00 = vRest[c][r];
-                            const p10 = vRest[c + 1][r];
-                            const p11 = vRest[c + 1][r + 1];
-                            const p01 = vRest[c][r + 1];
-
-                            const q00 = vDeformed[c][r];
-                            const q10 = vDeformed[c + 1][r];
-                            const q11 = vDeformed[c + 1][r + 1];
-                            const q01 = vDeformed[c][r + 1];
-
-                            drawTriangleHardware(bbCtx, origCanvas, p00, p10, p01, q00, q10, q01);
-                            drawTriangleHardware(bbCtx, origCanvas, p10, p11, p01, q10, q11, q01);
-                        }
+                    for (const [i0, i1, i2] of triangles) {
+                        const p0 = vRest[i0], p1 = vRest[i1], p2 = vRest[i2];
+                        const q0 = vDeformed[i0], q1 = vDeformed[i1], q2 = vDeformed[i2];
+                        drawTriangleHardware(bbCtx, origCanvas, p0, p1, p2, q0, q1, q2);
                     }
                 }
             } else {
@@ -426,21 +455,10 @@ Filters.register('distort-puppet-warp', {
                         sampler = sampleBicubic;
                     }
 
-                    for (let c = 0; c < cols; c++) {
-                        for (let r = 0; r < rows; r++) {
-                            const p00 = vRest[c][r];
-                            const p10 = vRest[c + 1][r];
-                            const p11 = vRest[c + 1][r + 1];
-                            const p01 = vRest[c][r + 1];
-
-                            const q00 = vDeformed[c][r];
-                            const q10 = vDeformed[c + 1][r];
-                            const q11 = vDeformed[c + 1][r + 1];
-                            const q01 = vDeformed[c][r + 1];
-
-                            drawTriangleSoftware(dst8, p00, p10, p01, q00, q10, q01, sampler);
-                            drawTriangleSoftware(dst8, p10, p11, p01, q10, q11, q01, sampler);
-                        }
+                    for (const [i0, i1, i2] of triangles) {
+                        const p0 = vRest[i0], p1 = vRest[i1], p2 = vRest[i2];
+                        const q0 = vDeformed[i0], q1 = vDeformed[i1], q2 = vDeformed[i2];
+                        drawTriangleSoftware(dst8, p0, p1, p2, q0, q1, q2, sampler);
                     }
                     bbCtx.putImageData(dstImageData, 0, 0);
                 }
@@ -450,7 +468,6 @@ Filters.register('distort-puppet-warp', {
             viewport.drawOverlay();
         };
 
-        // Moving Least Squares Closed-Form Solver
         const solveMLS = (v_x: number, v_y: number, pinsArray: WarpPin[], m: typeof mode, aVal: number) => {
             const N = pinsArray.length;
             if (N === 0) return { x: v_x, y: v_y };
@@ -588,7 +605,6 @@ Filters.register('distort-puppet-warp', {
             }
         };
 
-        // Custom High-Quality Scanline Rasterizer
         const drawTriangleSoftware = (
             dstData: Uint8ClampedArray,
             p0: { x: number; y: number },
@@ -616,7 +632,7 @@ Filters.register('distort-puppet-warp', {
                     const w1 = ((q2.y - q0.y) * (x - q2.x) + (q0.x - q2.x) * (y - q2.y)) * invDenom;
                     const w2 = 1.0 - w0 - w1;
 
-                    const eps = -1e-4; // Tiny overlap prevent edge line cracks
+                    const eps = -1e-4;
                     if (w0 >= eps && w1 >= eps && w2 >= eps) {
                         const u = w0 * p0.x + w1 * p1.x + w2 * p2.x;
                         const v = w0 * p0.y + w1 * p1.y + w2 * p2.y;
@@ -631,7 +647,6 @@ Filters.register('distort-puppet-warp', {
             }
         };
 
-        // Triangle clipper & hardware texture mapper (Fast preview renderer)
         const drawTriangleHardware = (
             bCtx: CanvasRenderingContext2D,
             img: HTMLCanvasElement,
@@ -643,6 +658,9 @@ Filters.register('distort-puppet-warp', {
             q2: { x: number; y: number }
         ) => {
             bCtx.save();
+            
+            // Explicitly reset hardware matrix before calculating relative mapping 
+            bCtx.setTransform(1, 0, 0, 1, 0, 0);
 
             const cx = (q0.x + q1.x + q2.x) / 3;
             const cy = (q0.y + q1.y + q2.y) / 3;
@@ -679,27 +697,20 @@ Filters.register('distort-puppet-warp', {
                 const e = x0 - a * u0 - c * v0;
                 const f = y0 - b * u0 - d * v0;
 
-                bCtx.transform(a, b, c, d, e, f);
+                // Explicitly set the precise calculated transform for this triangle
+                bCtx.setTransform(a, b, c, d, e, f);
                 bCtx.drawImage(img, 0, 0);
             }
 
             bCtx.restore();
         };
 
-        // Renders visual heatmap representation inside overlays
         const drawTriangleHeatmap = (
             ctx: CanvasRenderingContext2D,
-            c0: number, r0: number,
-            c1: number, r1: number,
-            c2: number, r2: number
+            i0: number, i1: number, i2: number
         ) => {
-            const p0 = vRest[c0][r0];
-            const p1 = vRest[c1][r1];
-            const p2 = vRest[c2][r2];
-
-            const q0 = vDeformed[c0][r0];
-            const q1 = vDeformed[c1][r1];
-            const q2 = vDeformed[c2][r2];
+            const p0 = vRest[i0], p1 = vRest[i1], p2 = vRest[i2];
+            const q0 = vDeformed[i0], q1 = vDeformed[i1], q2 = vDeformed[i2];
 
             const L01 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
             const L12 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -714,7 +725,7 @@ Filters.register('distort-puppet-warp', {
             const s20 = L20 === 0 ? 0 : Math.abs(l20 / L20 - 1);
 
             const stress = (s01 + s12 + s20) / 3;
-            const factor = Math.min(1.0, stress / 0.4); // maximum redness at 40% elongation
+            const factor = Math.min(1.0, stress / 0.4);
 
             const red = Math.round(factor * 255);
             const green = Math.round((1 - factor) * 255);
@@ -735,53 +746,46 @@ Filters.register('distort-puppet-warp', {
         };
 
         const freezeBorders = () => {
-            // Remove previous borders to prevent duplicates
             pins = pins.filter(p => !p.id.startsWith('border_'));
 
-            const numPointsX = 6;
-            const numPointsY = Math.max(4, Math.round(numPointsX * (fullH / fullW)));
-            const borderPins: WarpPin[] = [];
+            if (vRest.length === 0 || triangles.length === 0) return;
 
-            // top & bottom caps
-            for (let i = 0; i < numPointsX; i++) {
-                const tx = i / (numPointsX - 1);
-                const x = tx * fullW;
-                
-                borderPins.push({
-                    id: 'border_t_' + i,
-                    x: x, y: 0,
-                    targetX: x, targetY: 0,
-                    stiffness: 1.0,
-                    rotation: 0,
-                    scale: 1.0
-                });
-                borderPins.push({
-                    id: 'border_b_' + i,
-                    x: x, y: fullH,
-                    targetX: x, targetY: fullH,
-                    stiffness: 1.0,
-                    rotation: 0,
-                    scale: 1.0
-                });
+            // Analyze edge-sharing topology to extract the actual subject boundary
+            const edgeCount = new Map<string, number>();
+            const registerEdge = (iA: number, iB: number) => {
+                const key = Math.min(iA, iB) + '-' + Math.max(iA, iB);
+                edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+            };
+
+            for (const [i0, i1, i2] of triangles) {
+                registerEdge(i0, i1);
+                registerEdge(i1, i2);
+                registerEdge(i2, i0);
             }
 
-            // left & right margins (excluding corners)
-            for (let i = 1; i < numPointsY - 1; i++) {
-                const ty = i / (numPointsY - 1);
-                const y = ty * fullH;
+            const boundaryVertexIds = new Set<number>();
+            for (const [key, count] of edgeCount.entries()) {
+                if (count === 1) {
+                    const [iA, iB] = key.split('-').map(Number);
+                    boundaryVertexIds.add(iA);
+                    boundaryVertexIds.add(iB);
+                }
+            }
 
+            const boundaryArray = Array.from(boundaryVertexIds);
+            const step = Math.max(1, Math.round(boundaryArray.length / 16));
+
+            const borderPins: WarpPin[] = [];
+            for (let i = 0; i < boundaryArray.length; i += step) {
+                const vIndex = boundaryArray[i];
+                const pt = vRest[vIndex];
+                
                 borderPins.push({
-                    id: 'border_l_' + i,
-                    x: 0, y: y,
-                    targetX: 0, targetY: y,
-                    stiffness: 1.0,
-                    rotation: 0,
-                    scale: 1.0
-                });
-                borderPins.push({
-                    id: 'border_r_' + i,
-                    x: fullW, y: y,
-                    targetX: fullW, targetY: y,
+                    id: 'border_' + vIndex,
+                    x: pt.x,
+                    y: pt.y,
+                    targetX: pt.x,
+                    targetY: pt.y,
                     stiffness: 1.0,
                     rotation: 0,
                     scale: 1.0
@@ -793,91 +797,10 @@ Filters.register('distort-puppet-warp', {
             recalculateAndRender();
         };
 
-        viewport.onDraw = () => {
-            viewport.ctx.clearRect(0, 0, canvas.width, canvas.height);
-            viewport.ctx.drawImage(backbuffer, 0, 0);
-        };
-
-        viewport.onDrawOverlay = (oCtx: CanvasRenderingContext2D) => {
-            // Draw visual stress heatmap
-            if (showHeatmap && pins.length > 0 && vDeformed.length > 0) {
-                for (let c = 0; c < cols; c++) {
-                    for (let r = 0; r < rows; r++) {
-                        drawTriangleHeatmap(oCtx, c, r, c + 1, r, c, r + 1);
-                        drawTriangleHeatmap(oCtx, c + 1, r, c + 1, r + 1, c, r + 1);
-                    }
-                }
-            }
-
-            // Draw Wireframe overlay
-            if (showMesh && pins.length > 0 && vDeformed.length > 0) {
-                oCtx.strokeStyle = 'rgba(0, 230, 120, 0.35)';
-                oCtx.lineWidth = 1;
-
-                for (let c = 0; c <= cols; c++) {
-                    for (let r = 0; r <= rows; r++) {
-                        const pCurr = vDeformed[c][r];
-                        const sCurr = viewport.canvasToOverlay(pCurr.x, pCurr.y);
-
-                        if (c < cols) {
-                            const pRight = vDeformed[c + 1][r];
-                            const sRight = viewport.canvasToOverlay(pRight.x, pRight.y);
-                            oCtx.beginPath();
-                            oCtx.moveTo(sCurr.x, sCurr.y);
-                            oCtx.lineTo(sRight.x, sRight.y);
-                            oCtx.stroke();
-                        }
-
-                        if (r < rows) {
-                            const pDown = vDeformed[c][r + 1];
-                            const sDown = viewport.canvasToOverlay(pDown.x, pDown.y);
-                            oCtx.beginPath();
-                            oCtx.moveTo(sCurr.x, sCurr.y);
-                            oCtx.lineTo(sDown.x, sDown.y);
-                            oCtx.stroke();
-                        }
-                    }
-                }
-            }
-
-            // Draw visual pins
-            if (showPins) {
-                pins.forEach(pin => {
-                    const sPos = viewport.canvasToOverlay(pin.targetX, pin.targetY);
-                    const isSelected = selectedPinIds.has(pin.id);
-
-                    // Draw stiffness influence visual field
-                    const circleRadius = viewport.canvasLengthToOverlay(pin.stiffness * 25);
-                    oCtx.beginPath();
-                    oCtx.arc(sPos.x, sPos.y, circleRadius, 0, 2 * Math.PI);
-                    oCtx.strokeStyle = isSelected ? 'rgba(255, 170, 0, 0.22)' : 'rgba(0, 122, 204, 0.15)';
-                    oCtx.lineWidth = 1;
-                    oCtx.setLineDash([4, 4]);
-                    oCtx.stroke();
-                    oCtx.setLineDash([]);
-
-                    oCtx.beginPath();
-                    oCtx.arc(sPos.x, sPos.y, 8, 0, 2 * Math.PI);
-                    oCtx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-                    oCtx.strokeStyle = isSelected ? '#ffaa00' : '#222';
-                    oCtx.lineWidth = isSelected ? 2 : 1.5;
-                    oCtx.fill();
-                    oCtx.stroke();
-
-                    oCtx.beginPath();
-                    oCtx.arc(sPos.x, sPos.y, 4, 0, 2 * Math.PI);
-                    oCtx.fillStyle = isSelected ? '#ff3366' : '#007acc';
-                    oCtx.fill();
-                });
-            }
-        };
-
-        viewport.onMouseDown = (ev) => {
-            const clickX = ev.x;
-            const clickY = ev.y;
-
+        const hitTestPins = (clickX: number, clickY: number): WarpPin | null => {
+            const hitRadius = 16;
             let clickedPin = null;
-            let minDist = 16;
+            let minDist = hitRadius;
 
             for (let i = 0; i < pins.length; i++) {
                 const p = pins[i];
@@ -887,8 +810,110 @@ Filters.register('distort-puppet-warp', {
                     clickedPin = p;
                 }
             }
+            return clickedPin;
+        };
 
-            // Right Click deletion
+        const updateCursor = (clickX: number, clickY: number, isShift: boolean) => {
+            if (isDraggingPin) {
+                canvas.style.cursor = 'grabbing';
+                return;
+            }
+
+            const hovered = hitTestPins(clickX, clickY);
+            if (hovered) {
+                if (activeTool === 'remove') {
+                    canvas.style.cursor = 'no-drop';
+                } else if (isShift) {
+                    canvas.style.cursor = 'crosshair';
+                } else {
+                    canvas.style.cursor = 'grab';
+                }
+            } else {
+                if (activeTool === 'add') {
+                    canvas.style.cursor = 'alias';
+                } else if (activeTool === 'drag') {
+                    canvas.style.cursor = 'default';
+                } else {
+                    canvas.style.cursor = 'default';
+                }
+            }
+        };
+
+        viewport.onDraw = () => {
+            viewport.ctx.clearRect(0, 0, canvas.width, canvas.height);
+            viewport.ctx.drawImage(backbuffer, 0, 0);
+        };
+
+        viewport.onDrawOverlay = (oCtx: CanvasRenderingContext2D) => {
+            if (showHeatmap && pins.length > 0 && vDeformed.length > 0) {
+                for (const [i0, i1, i2] of triangles) {
+                    drawTriangleHeatmap(oCtx, i0, i1, i2);
+                }
+            }
+
+            if (showMesh && pins.length > 0 && vDeformed.length > 0) {
+                oCtx.strokeStyle = 'rgba(0, 230, 120, 0.35)';
+                oCtx.lineWidth = 1;
+                oCtx.beginPath();
+                
+                const drawnEdges = new Set<string>();
+
+                for (const [i0, i1, i2] of triangles) {
+                    const edges = [[i0, i1], [i1, i2], [i2, i0]];
+                    for (const [a, b] of edges) {
+                        const edgeKey = Math.min(a, b) + '-' + Math.max(a, b);
+                        if (!drawnEdges.has(edgeKey)) {
+                            drawnEdges.add(edgeKey);
+                            const pA = viewport.canvasToOverlay(vDeformed[a].x, vDeformed[a].y);
+                            const pB = viewport.canvasToOverlay(vDeformed[b].x, vDeformed[b].y);
+                            oCtx.moveTo(pA.x, pA.y);
+                            oCtx.lineTo(pB.x, pB.y);
+                        }
+                    }
+                }
+                oCtx.stroke();
+            }
+
+            if (showPins) {
+                pins.forEach(pin => {
+                    const sPos = viewport.canvasToOverlay(pin.targetX, pin.targetY);
+                    const isSelected = selectedPinIds.has(pin.id);
+                    const isHovered = pin.id === hoveredPinId;
+
+                    if (isSelected) {
+                        const circleRadius = viewport.canvasLengthToOverlay(pin.stiffness * 25);
+                        oCtx.beginPath();
+                        oCtx.arc(sPos.x, sPos.y, circleRadius, 0, 2 * Math.PI);
+                        oCtx.strokeStyle = 'rgba(255, 170, 0, 0.22)';
+                        oCtx.lineWidth = 1;
+                        oCtx.setLineDash([4, 4]);
+                        oCtx.stroke();
+                        oCtx.setLineDash([]);
+                    }
+
+                    oCtx.beginPath();
+                    oCtx.arc(sPos.x, sPos.y, isHovered ? 10 : 8, 0, 2 * Math.PI);
+                    oCtx.fillStyle = isHovered ? 'rgba(255, 255, 255, 1)' : 'rgba(255, 255, 255, 0.85)';
+                    oCtx.strokeStyle = isSelected ? '#ffaa00' : '#222';
+                    oCtx.lineWidth = isSelected ? 2 : 1.5;
+                    oCtx.fill();
+                    oCtx.stroke();
+
+                    oCtx.beginPath();
+                    oCtx.arc(sPos.x, sPos.y, isHovered ? 5 : 4, 0, 2 * Math.PI);
+                    oCtx.fillStyle = isSelected ? '#ff3366' : (isHovered ? '#3399ff' : '#007acc');
+                    oCtx.fill();
+                });
+            }
+        };
+
+        viewport.onMouseDown = (ev) => {
+            const clickX = ev.x;
+            const clickY = ev.y;
+            const isShift = ev.originalEvent && 'shiftKey' in ev.originalEvent && (ev.originalEvent as any).shiftKey;
+
+            const clickedPin = hitTestPins(clickX, clickY);
+
             if (ev.isRightClick || ev.button === 2) {
                 if (clickedPin) {
                     pins = pins.filter(p => p.id !== clickedPin.id);
@@ -896,8 +921,12 @@ Filters.register('distort-puppet-warp', {
                     if (selectedPinId === clickedPin.id) {
                         selectedPinId = null;
                     }
+                    if (hoveredPinId === clickedPin.id) {
+                        hoveredPinId = null;
+                    }
                     saveLocalState();
                     recalculateAndRender();
+                    updateCursor(clickX, clickY, isShift);
                 }
                 return;
             }
@@ -906,18 +935,21 @@ Filters.register('distort-puppet-warp', {
                 if (activeTool === 'remove') {
                     pins = pins.filter(p => p.id !== clickedPin.id);
                     selectedPinIds.delete(clickedPin.id);
-                    selectedPinId = null;
+                    if (selectedPinId === clickedPin.id) {
+                        selectedPinId = null;
+                    }
+                    if (hoveredPinId === clickedPin.id) {
+                        hoveredPinId = null;
+                    }
                     saveLocalState();
                     recalculateAndRender();
                 } else {
-                    // Multi-select handling with Shift
-                    const isShift = ev.originalEvent && 'shiftKey' in ev.originalEvent && (ev.originalEvent as any).shiftKey;
                     if (isShift) {
                         if (selectedPinIds.has(clickedPin.id)) {
                             selectedPinIds.delete(clickedPin.id);
                         } else {
                             selectedPinIds.add(clickedPin.id);
-                            selectedPinId = clickedPin.id; // Edit properties of most recently added pin
+                            selectedPinId = clickedPin.id;
                         }
                     } else {
                         if (!selectedPinIds.has(clickedPin.id)) {
@@ -927,7 +959,6 @@ Filters.register('distort-puppet-warp', {
                         selectedPinId = clickedPin.id;
                     }
 
-                    // Store starting anchor translations for relative multi-drags
                     pins.forEach(p => {
                         dragStartPositions[p.id] = { x: p.targetX, y: p.targetY };
                     });
@@ -941,7 +972,6 @@ Filters.register('distort-puppet-warp', {
                 }
             } else {
                 if (activeTool === 'add') {
-                    // Extract exact original rest coordinates based on current active warp layout
                     const originalCoords = getOriginalCoords(clickX, clickY);
                     const newPin: WarpPin = {
                         id: 'pin_' + Math.random().toString(36).substr(2, 9),
@@ -959,13 +989,16 @@ Filters.register('distort-puppet-warp', {
                     selectedPinIds.add(newPin.id);
                     selectedPinId = newPin.id;
 
+                    dragStartPositions[newPin.id] = { x: clickX, y: clickY };
+                    dragStartMouseX = clickX;
+                    dragStartMouseY = clickY;
+
                     activeDragPinId = newPin.id;
                     isDraggingPin = true;
                     hasDragged = false;
                     saveLocalState();
                     recalculateAndRender();
                 } else {
-                    const isShift = ev.originalEvent && 'shiftKey' in ev.originalEvent && (ev.originalEvent as any).shiftKey;
                     if (!isShift) {
                         selectedPinIds.clear();
                         selectedPinId = null;
@@ -973,29 +1006,43 @@ Filters.register('distort-puppet-warp', {
                     viewport.drawOverlay();
                 }
             }
+            updateCursor(clickX, clickY, isShift);
             updateSidebarFields();
         };
 
         viewport.onMouseMove = (ev) => {
+            const clickX = ev.x;
+            const clickY = ev.y;
+            const isShift = ev.originalEvent && 'shiftKey' in ev.originalEvent && (ev.originalEvent as any).shiftKey;
+
             if (isDraggingPin && activeDragPinId) {
-                const dx = ev.x - dragStartMouseX;
-                const dy = ev.y - dragStartMouseY;
+                const dx = clickX - dragStartMouseX;
+                const dy = clickY - dragStartMouseY;
 
                 selectedPinIds.forEach(id => {
                     const pin = pins.find(p => p.id === id);
                     const startPos = dragStartPositions[id];
                     if (pin && startPos) {
-                        pin.targetX = Math.max(0, Math.min(fullW, startPos.x + dx));
-                        pin.targetY = Math.max(0, Math.min(fullH, startPos.y + dy));
+                        pin.targetX = startPos.x + dx;
+                        pin.targetY = startPos.y + dy;
                     }
                 });
 
                 hasDragged = true;
                 recalculateAndRender();
+            } else {
+                const hovered = hitTestPins(clickX, clickY);
+                const newHoveredId = hovered ? hovered.id : null;
+                if (hoveredPinId !== newHoveredId) {
+                    hoveredPinId = newHoveredId;
+                    viewport.drawOverlay();
+                }
             }
+
+            updateCursor(clickX, clickY, isShift);
         };
 
-        viewport.onMouseUp = () => {
+        viewport.onMouseUp = (ev) => {
             if (isDraggingPin) {
                 isDraggingPin = false;
                 activeDragPinId = null;
@@ -1003,10 +1050,12 @@ Filters.register('distort-puppet-warp', {
                     saveLocalState();
                 }
                 recalculateAndRender();
+                
+                const isShift = ev.originalEvent && 'shiftKey' in ev.originalEvent && (ev.originalEvent as any).shiftKey;
+                updateCursor(ev.x, ev.y, isShift);
             }
         };
 
-        // Sidebar layout building
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Puppet Warp Tools'));
 
         ws.sidebar.appendChild(UI.createRadioGroup({
@@ -1023,11 +1072,9 @@ Filters.register('distort-puppet-warp', {
             }
         }));
 
-        // Contextual Per-Pin Stiffness, Rotation, and Local Expand Parameters
         const stiffnessSection = UI.createNode('div', { style: 'display: none;' });
         stiffnessSection.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Selected Pin Properties'));
 
-        // 1. Influence (Stiffness) Slider
         const stiffnessRow = UI.createSliderRow({
             label: 'Pin Influence', min: 0.2, max: 10.0, step: 0.1, value: 1.0,
             onInput: (v) => {
@@ -1035,13 +1082,13 @@ Filters.register('distort-puppet-warp', {
                     const pin = pins.find(p => p.id === selectedPinId);
                     if (pin) {
                         pin.stiffness = parseFloat(v);
-                        isAdjustingSlider = true; // Use fast GPU preview during adjusting
+                        isAdjustingSlider = true;
                         recalculateAndRender();
                     }
                 }
             },
             onChange: () => {
-                isAdjustingSlider = false; // Trigger high quality pass on release
+                isAdjustingSlider = false;
                 saveLocalState();
                 recalculateAndRender();
             }
@@ -1049,7 +1096,6 @@ Filters.register('distort-puppet-warp', {
         const stiffnessInput = stiffnessRow.querySelector('input[type="range"]') as HTMLInputElement;
         stiffnessSection.appendChild(stiffnessRow);
 
-        // 2. Twist Angle Slider
         const rotationRow = UI.createSliderRow({
             label: 'Pin Twist', min: -180, max: 180, step: 1, value: 0,
             formatter: (v) => `${v}°`,
@@ -1072,7 +1118,6 @@ Filters.register('distort-puppet-warp', {
         const rotationInput = rotationRow.querySelector('input[type="range"]') as HTMLInputElement;
         stiffnessSection.appendChild(rotationRow);
 
-        // 3. Expansion Scale Slider
         const scaleRow = UI.createSliderRow({
             label: 'Pin Expand', min: 0.2, max: 3.0, step: 0.05, value: 1.0,
             formatter: (v) => `${Math.round(Number(v) * 100)}%`,
@@ -1117,7 +1162,7 @@ Filters.register('distort-puppet-warp', {
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Rigid Weights'));
 
         ws.sidebar.appendChild(UI.createSliderRow({
-            label: 'Stiffness (α)', min: 0.5, max: 3.0, step: 0.1, value: alpha,
+            label: 'Stiffness (α)', min: 0.5, max: 5.0, step: 0.1, value: alpha,
             onInput: (v) => {
                 alpha = parseFloat(v);
                 isAdjustingSlider = true;
@@ -1131,10 +1176,10 @@ Filters.register('distort-puppet-warp', {
         }));
 
         ws.sidebar.appendChild(UI.createSliderRow({
-            label: 'Grid Density', min: 10, max: 50, step: 1, value: gridSize,
+            label: 'Grid Density', min: 10, max: 100, step: 1, value: gridSize,
             onInput: (v) => {
                 gridSize = parseInt(v);
-                buildRestGrid();
+                buildMesh();
                 isAdjustingSlider = true;
                 recalculateAndRender();
             },
@@ -1209,7 +1254,7 @@ Filters.register('distort-puppet-warp', {
         ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Actions'));
 
         ws.sidebar.appendChild(UI.createButton({
-            label: 'Freeze Borders',
+            label: 'Freeze Subject Borders',
             className: 'btn',
             style: 'width: 100%; margin-bottom: 8px; font-weight: bold; background-color: #007acc;',
             onClick: () => {
@@ -1241,6 +1286,7 @@ Filters.register('distort-puppet-warp', {
                 pins = [];
                 selectedPinIds.clear();
                 selectedPinId = null;
+                hoveredPinId = null;
                 saveLocalState();
                 recalculateAndRender();
             }
@@ -1272,9 +1318,8 @@ Filters.register('distort-puppet-warp', {
             (redoBtn as HTMLButtonElement).disabled = redoStack.length === 0;
         };
 
-        // Bootstrap visual canvases and reveal workspace
-        buildRestGrid();
-        saveLocalState(); // Initial undo anchor point
+        buildMesh();
+        saveLocalState();
         ws.show();
 
         setTimeout(() => {

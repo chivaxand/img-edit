@@ -70,6 +70,7 @@ export const Filters = {
     },
 
     applyEffect(l: Layer, def: FilterDef, values: any, record = true) {
+        const startTime = performance.now();
         let targetLayer = l;
         const hasNewLayer = values && values._newLayer;
         
@@ -155,6 +156,11 @@ export const Filters = {
 
         App.render();
         App.ui.refreshLayers();
+
+        const duration = performance.now() - startTime;
+        if (duration > 200) {
+            console.log(`Filter ${def.name} took ${(duration).toFixed(1)} ms`);
+        }
     },
 
     processPixels(layer: Layer, fn: Function) {

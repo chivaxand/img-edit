@@ -6,7 +6,7 @@ App.registerTool({
     id: 'lasso',
     icon: '➰',
     title: 'Lasso Select',
-    settings: { type: 'free', magneticRadius: 10, mode: 'new', autoAnchor: true },
+    settings: { type: 'free', magneticRadius: 30, searchRadius: 40, threshold: 30, anchorGap: 40, mode: 'new', autoAnchor: true },
 
     points: [] as any[],
     tempPoint: null as any,
@@ -48,13 +48,15 @@ App.registerTool({
             onChange: (v: string) => {
                 this.settings.type = v;
                 this.cancelSelection();
-                if (radiusContainer) {
-                    UI.toggle(radiusContainer, v === 'magnetic');
+                if (magneticOptionsContainer) {
+                    UI.toggle(magneticOptionsContainer, v === 'magnetic');
                 }
             }
         }));
 
-        const radiusRow = UI.createSliderRow({
+        const magneticOptionsContainer = UI.createNode('div', { style: 'display: flex; flex-direction: column; gap: 5px;' });
+
+        magneticOptionsContainer.appendChild(UI.createSliderRow({
             label: 'Snapping Radius',
             min: 5,
             max: 40,
@@ -63,10 +65,43 @@ App.registerTool({
                 this.settings.magneticRadius = parseInt(v);
                 App.render();
             }
-        });
-        const radiusContainer = UI.createNode('div', {}, radiusRow);
-        UI.toggle(radiusContainer, (this.settings.type || 'free') === 'magnetic');
-        panel.appendChild(radiusContainer);
+        }));
+
+        magneticOptionsContainer.appendChild(UI.createSliderRow({
+            label: 'Search Radius',
+            min: 10,
+            max: 200,
+            value: this.settings.searchRadius || 40,
+            onInput: (v: string) => {
+                this.settings.searchRadius = parseInt(v);
+                App.render();
+            }
+        }));
+
+        magneticOptionsContainer.appendChild(UI.createSliderRow({
+            label: 'Threshold',
+            min: 1,
+            max: 100,
+            value: this.settings.threshold || 30,
+            onInput: (v: string) => {
+                this.settings.threshold = parseInt(v);
+                App.render();
+            }
+        }));
+
+        magneticOptionsContainer.appendChild(UI.createSliderRow({
+            label: 'Anchor Gap',
+            min: 10,
+            max: 200,
+            value: this.settings.anchorGap || 40,
+            onInput: (v: string) => {
+                this.settings.anchorGap = parseInt(v);
+                App.render();
+            }
+        }));
+
+        panel.appendChild(magneticOptionsContainer);
+        UI.toggle(magneticOptionsContainer, (this.settings.type || 'free') === 'magnetic');
 
         panel.appendChild(UI.createCheckbox({
             label: 'Auto-Anchor (Path Freezing)',
@@ -281,8 +316,10 @@ App.registerTool({
                         if (visited[nidx]) continue;
                         
                         const edgeWeight = (dx === 0 || dy === 0) ? 1.0 : 1.414;
-                        const g = this.gradientMap[ny * w + nx];
-                        const cost = edgeWeight * (1.001 - g);
+                        const g1 = this.gradientMap[globalY * w + globalX];
+                        const g2 = this.gradientMap[ny * w + nx];
+                        const g = (g1 + g2) / 2;
+                        const cost = edgeWeight + (1.0 - g);
                         const nextDist = curDist + cost;
                         
                         if (nextDist < dists[nidx]) {
@@ -364,7 +401,7 @@ App.registerTool({
             return path;
         }
 
-        const pad = Math.max(30, (this.settings.magneticRadius || 30) * 2);
+        const pad = this.settings.searchRadius || 40;
         const xmin = Math.max(0, Math.min(x1, x2) - pad);
         const ymin = Math.max(0, Math.min(y1, y2) - pad);
         const xmax = Math.min(w - 1, Math.max(x1, x2) + pad);
@@ -414,8 +451,10 @@ App.registerTool({
                         if (visited[nidx]) continue;
                         
                         const edgeWeight = (dx === 0 || dy === 0) ? 1.0 : 1.414;
-                        const g = this.gradientMap[ny * w + nx];
-                        const cost = edgeWeight * (1.001 - g);
+                        const g1 = this.gradientMap[globalY * w + globalX];
+                        const g2 = this.gradientMap[ny * w + nx];
+                        const g = (g1 + g2) / 2;
+                        const cost = edgeWeight + (1.0 - g);
                         const nextDist = curDist + cost;
                         
                         if (nextDist < dists[nidx]) {
@@ -530,6 +569,81 @@ App.registerTool({
             x: l.x + pt.x * (l.width / l.canvas.width),
             y: l.y + pt.y * (l.height / l.canvas.height)
         };
+    },
+
+    calculateCheckPoints(path: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+        const anchorGap = this.settings.anchorGap || 40;
+        const threshold = (this.settings.threshold || 30) / 100;
+        const maxFactor = 2;
+        
+        let totalDistance = 0;
+        let minPoint = 0;
+        let midPoint = 1;
+        let finalPoint = 2;
+        
+        while (finalPoint < path.length) {
+            const d = Math.hypot(path[finalPoint].x - path[finalPoint - 1].x, path[finalPoint].y - path[finalPoint - 1].y);
+            totalDistance += d;
+            
+            if (totalDistance <= anchorGap / 3.0) {
+                minPoint = finalPoint;
+            }
+            if (totalDistance <= anchorGap) {
+                midPoint = finalPoint;
+            }
+            if (totalDistance > maxFactor * anchorGap) {
+                break;
+            }
+            finalPoint++;
+        }
+        
+        if (totalDistance > maxFactor * anchorGap) {
+            let foundSomething = false;
+            let checkPoint = midPoint;
+            
+            for (let i = midPoint; i < finalPoint; i++) {
+                const pt = path[i];
+                const px = Math.max(0, Math.min(this.gradWidth - 1, Math.round(pt.x)));
+                const py = Math.max(0, Math.min(this.gradHeight - 1, Math.round(pt.y)));
+                const g = this.gradientMap ? this.gradientMap[py * this.gradWidth + px] : 0;
+                if (g >= threshold) {
+                    checkPoint = i;
+                    foundSomething = true;
+                    break;
+                }
+            }
+            
+            if (!foundSomething) {
+                for (let i = midPoint - 1; i >= minPoint; i--) {
+                    const pt = path[i];
+                    const px = Math.max(0, Math.min(this.gradWidth - 1, Math.round(pt.x)));
+                    const py = Math.max(0, Math.min(this.gradHeight - 1, Math.round(pt.y)));
+                    const g = this.gradientMap ? this.gradientMap[py * this.gradWidth + px] : 0;
+                    if (g >= threshold) {
+                        checkPoint = i;
+                        foundSomething = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!foundSomething) {
+                checkPoint = midPoint;
+            }
+            
+            const newSeed = path[checkPoint];
+            
+            App.actions.saveState();
+            this.seeds.push(newSeed);
+            this.segments.push(path.slice(0, checkPoint + 1));
+            
+            this.buildLiveWireCache(newSeed);
+            
+            const remainingSuffix = path.slice(checkPoint);
+            return this.calculateCheckPoints(remainingSuffix);
+        }
+        
+        return path;
     },
 
     updateAutoAnchor(newPath: Array<{ x: number; y: number }>) {
@@ -662,6 +776,7 @@ App.registerTool({
                 const tolerance = 8 * (l.canvas.width / l.width);
                 if (distToStart < tolerance) {
                     this.closeCurve();
+                    this.finishSelection();
                     return;
                 }
             }
@@ -751,10 +866,10 @@ App.registerTool({
             const isForced = e.shiftKey;
             const snapped = (this.settings.type === 'magnetic' && !isForced) ? this.getSnappedPoint(lx, ly, this.settings.magneticRadius || 30) : { x: lx, y: ly };
             
-            const nextPath = this.settings.type === 'magnetic' ? this.traceLiveWireCache(snapped, prev) : this.getPolySegment(prev, snapped);
+            let nextPath = this.settings.type === 'magnetic' ? this.traceLiveWireCache(snapped, prev) : this.getPolySegment(prev, snapped);
             
             if (this.settings.type === 'magnetic' && this.settings.autoAnchor !== false) {
-                this.updateAutoAnchor(nextPath);
+                nextPath = this.calculateCheckPoints(nextPath);
             }
             
             this.tempSegment = nextPath;
@@ -918,23 +1033,23 @@ App.registerTool({
 
         for (let i = 0; i < this.seeds.length; i++) {
             const gp = this.toGlobal(activeL, this.seeds[i]);
-            if (this.hoveredSeedIndex === i) {
-                ctx.fillStyle = 'rgba(255, 193, 7, 0.5)';
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            if (i === 0) {
+                // First anchor is green in Krita, indicating snap/close area
+                ctx.fillStyle = 'rgba(40, 167, 69, 0.8)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            } else if (this.hoveredSeedIndex === i) {
+                ctx.fillStyle = 'rgba(255, 193, 7, 0.8)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
                 ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(gp.x, gp.y, 4.5, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
             } else {
-                ctx.fillStyle = 'rgba(0, 122, 204, 0.5)';
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.fillStyle = 'rgba(0, 122, 204, 0.7)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
                 ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.arc(gp.x, gp.y, 3.5, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
             }
+            ctx.beginPath();
+            ctx.arc(gp.x, gp.y, i === 0 ? 5.0 : 3.5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
         }
 
         if (this.hoveredSegmentPoint && this.hoveredSegmentIndex !== null) {
@@ -1059,6 +1174,7 @@ class DijkstraHeap {
         let p = this.pos[idx];
         if (p === -1) {
             this.heap.push(idx);
+            this.pos[idx] = this.heap.length - 1;
             this.up(this.heap.length - 1);
         } else {
             this.up(p);

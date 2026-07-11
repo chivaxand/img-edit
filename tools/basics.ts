@@ -2,6 +2,94 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
+export function drawBrushCircle(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, options: { dashed?: boolean; color1?: string; color2?: string } = {}) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = options.color1 || '#ffffff';
+    ctx.lineWidth = 1.5;
+    if (options.dashed) {
+        ctx.setLineDash([4, 4]);
+    } else {
+        ctx.setLineDash([]);
+    }
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = options.color2 || '#000000';
+    ctx.lineWidth = 1.0;
+    if (options.dashed) {
+        ctx.setLineDash([4, 4]);
+        ctx.lineDashOffset = 4;
+    } else {
+        ctx.setLineDash([4, 4]);
+    }
+    ctx.stroke();
+    ctx.restore();
+}
+
+export function drawActiveBrushCircle(size: number, options: { dashed?: boolean; color1?: string; color2?: string } = {}) {
+    if (App.state.mousePos) {
+        const ctx = App.els.ctx;
+        const l = App.utils.getActive();
+        const scale = (l && l.canvas && l.canvas.width) ? (l.width / l.canvas.width) : 1;
+        const radius = (size / 2) * scale;
+        drawBrushCircle(ctx, App.state.mousePos.x, App.state.mousePos.y, radius, options);
+    }
+}
+
+export function createBrushCanvas(size: number, hardness: number, color?: string): HTMLCanvasElement {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    const r = size / 2;
+    const grad = ctx.createRadialGradient(r, r, 0, r, r, r);
+    const stop0 = Math.max(0, Math.min(1, hardness / 100));
+    
+    if (color) {
+        const rgb = App.utils.hexToRgb(color) || { r: 0, g: 0, b: 0 };
+        grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
+        if (stop0 < 1 && stop0 > 0) grad.addColorStop(stop0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
+        if (stop0 < 1) grad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`);
+    } else {
+        grad.addColorStop(0, 'rgba(0,0,0,1)');
+        if (stop0 < 1 && stop0 > 0) grad.addColorStop(stop0, 'rgba(0,0,0,1)');
+        if (stop0 < 1) grad.addColorStop(1, 'rgba(0,0,0,0)');
+    }
+    
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(r, r, r, 0, Math.PI * 2);
+    ctx.fill();
+    return canvas;
+}
+
+export function interpolateDabs(
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    accumulator: number,
+    spacing: number,
+    stamp: (x: number, y: number) => void
+): number {
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (dist > 0) {
+        const dx = (p2.x - p1.x) / dist;
+        const dy = (p2.y - p1.y) / dist;
+        let d = accumulator;
+        while (d <= dist) {
+            stamp(p1.x + dx * d, p1.y + dy * d);
+            d += spacing;
+        }
+        return d - dist;
+    }
+    return accumulator;
+}
+
+(App.utils as any).drawBrushCircle = drawBrushCircle;
+(App.utils as any).drawActiveBrushCircle = drawActiveBrushCircle;
+
 // Move Tool
 App.registerTool({
     id: 'move',
@@ -73,6 +161,9 @@ App.registerTool({
         brushCanvas: null as HTMLCanvasElement | null,
         distanceAccumulator: 0,
         
+        drawUI() {
+            drawActiveBrushCircle(this.settings.size);
+        },
         onSelect(panel: HTMLElement) {
             panel.appendChild(UI.createSliderRow({ label: 'Size', min: 1, max: 100, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));
             panel.appendChild(UI.createSliderRow({ label: 'Hardness', min: 0, max: 100, value: this.settings.hardness, onInput: (v: string) => this.settings.hardness = parseInt(v) }));
@@ -110,44 +201,7 @@ App.registerTool({
             const size = this.settings.size;
             const color = type === 'eraser' ? '#000000' : App.state.fg;
             
-            this.brushCanvas = document.createElement('canvas');
-            this.brushCanvas.width = size;
-            this.brushCanvas.height = size;
-            const bCtx = this.brushCanvas.getContext('2d')!;
-            const imgData = bCtx.createImageData(size, size);
-            const data = imgData.data;
-            const rgb = App.utils.hexToRgb(color) || { r: 0, g: 0, b: 0 };
-            const r = size / 2;
-            const hLimit = this.settings.hardness / 100;
-            
-            for (let y = 0; y < size; y++) {
-                for (let x = 0; x < size; x++) {
-                    const dx = (x + 0.5) - r;
-                    const dy = (y + 0.5) - r;
-                    const dist = Math.hypot(dx, dy);
-                    let normDist = dist / r;
-                    
-                    let alpha = 0;
-                    if (this.settings.hardness === 100) {
-                        alpha = normDist <= 1.0 ? 1.0 : 0.0;
-                    } else {
-                        if (normDist <= hLimit) {
-                            alpha = 1.0;
-                        } else if (normDist > 1.0) {
-                            alpha = 0.0;
-                        } else {
-                            alpha = 1.0 - (normDist - hLimit) / (1.0 - hLimit);
-                        }
-                    }
-                    
-                    const idx = (y * size + x) * 4;
-                    data[idx] = rgb.r;
-                    data[idx + 1] = rgb.g;
-                    data[idx + 2] = rgb.b;
-                    data[idx + 3] = Math.round(alpha * 255);
-                }
-            }
-            bCtx.putImageData(imgData, 0, 0);
+            this.brushCanvas = createBrushCanvas(size, this.settings.hardness, color);
 
             // Draw initial dab and reset spacing accumulator
             const spacingPx = 1;
@@ -172,7 +226,7 @@ App.registerTool({
         },
         onMouseUp() { 
             App.state.isDrawing = false; 
-            App.state.scratch = null;
+            App.state.movingSelection = false;
             this.brushCanvas = null;
             this.distanceAccumulator = 0;
         },
@@ -208,18 +262,7 @@ App.registerTool({
             if (isInitial) {
                 stampAt(p1.x, p1.y);
             } else {
-                const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-                if (dist > 0) {
-                    const dx = (p2.x - p1.x) / dist;
-                    const dy = (p2.y - p1.y) / dist;
-                    
-                    let d = this.distanceAccumulator;
-                    while (d <= dist) {
-                        stampAt(p1.x + dx * d, p1.y + dy * d);
-                        d += spacingPx;
-                    }
-                    this.distanceAccumulator = d - dist;
-                }
+                this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
             }
             
             if (hasSel && App.state.scratch) {

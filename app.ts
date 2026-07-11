@@ -37,6 +37,7 @@ export interface AppState {
     zoom: number;
     recording: boolean;
     recordedSteps: string[];
+    mousePos?: { x: number; y: number } | null;
     selection: { 
         active: boolean; 
         mask: HTMLCanvasElement | null; 
@@ -101,7 +102,7 @@ export interface AppActions {
     inverseSelection(): void;
     updateSelectionOutline(): void;
     saveSelection(mode?: 'content' | 'mask', inverse?: boolean): void;
-    loadSelection(layerIndex?: number, mode?: 'alpha' | 'grayscale', inverse?: boolean): void;
+    loadSelection(layerIndex?: number, mode?: 'auto' | 'alpha' | 'grayscale', inverse?: boolean): void;
     openSaveSelectionDialog(): void;
     openLoadSelectionDialog(): void;
     moveLayer(dir: number): void;
@@ -129,6 +130,7 @@ export const App = {
         zoom: 1,
         recording: false,
         recordedSteps: [],
+        mousePos: null,
         selection: { 
             active: false, 
             mask: null, 
@@ -294,6 +296,10 @@ export const App = {
         window.addEventListener('touchmove', this.events.onTouchMove.bind(this.events), { passive: false });
         window.addEventListener('touchend', this.events.onTouchEnd.bind(this.events), { passive: false });
         window.addEventListener('touchcancel', this.events.onTouchEnd.bind(this.events), { passive: false });
+        this.els.canvas.addEventListener('mouseleave', () => {
+            App.state.mousePos = null;
+            App.render();
+        });
         
         // Drag & Drop
         document.body.addEventListener('dragover', e => e.preventDefault());
@@ -513,6 +519,10 @@ export const App = {
                 return;
             }
             if (e.target === App.els.canvas) {
+                const pos = App.utils.getPos(e);
+                if (pos.x >= 0 && pos.x <= App.state.width && pos.y >= 0 && pos.y <= App.state.height) {
+                    App.state.mousePos = pos;
+                }
                 if (t && t.onMouseDown) t.onMouseDown(e);
             }
         },
@@ -524,8 +534,17 @@ export const App = {
                 App.els.workspace.scrollTop = App.panState.scrollStartY - dy;
                 return;
             }
+            const pos = App.utils.getPos(e);
+            if (pos.x >= 0 && pos.x <= App.state.width && pos.y >= 0 && pos.y <= App.state.height) {
+                App.state.mousePos = pos;
+            } else {
+                App.state.mousePos = null;
+            }
             const t = App.getTool();
             if (t && t.onMouseMove) t.onMouseMove(e);
+            if (t && t.drawUI) {
+                App.render();
+            }
         },
         onMouseUp(e: PointerCompatibleEvent) {
             if (App.panState && App.panState.active) {
@@ -537,6 +556,15 @@ export const App = {
             if (t && t.onMouseUp) t.onMouseUp(e);
             if (App.state.selection.active) {
                 App.state.selection.outline = null;
+            }
+            const pos = App.utils.getPos(e);
+            if (pos.x >= 0 && pos.x <= App.state.width && pos.y >= 0 && pos.y <= App.state.height) {
+                App.state.mousePos = pos;
+            } else {
+                App.state.mousePos = null;
+            }
+            if (t && t.drawUI) {
+                App.render();
             }
         },
         onDoubleClick(e: MouseEvent) { const t = App.getTool(); if (t && t.onDoubleClick) t.onDoubleClick(e as any); },
@@ -733,7 +761,9 @@ export const App = {
 
             // Render active tool overlay (e.g. transform handles)
             const t = App.getTool();
-            if (t && t.drawUI) t.drawUI();
+            if (t && t.drawUI) {
+                t.drawUI();
+            }
         }
     }
 };

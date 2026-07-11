@@ -141,6 +141,7 @@ interface UIInterface {
     createCanvas(opts?: UICanvasOpts): { element: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null };
     toggle(element: HTMLElement, isVisible: boolean, displayMode?: string): void;
     createSection(title: string, ...children: any[]): HTMLElement;
+    createContainer(...children: any[]): HTMLElement;
     createSubheading(text: string, color?: string): HTMLElement;
 }
 
@@ -427,6 +428,12 @@ export const UI: UIInterface = {
             }, title),
             ...children
         );
+    },
+
+    createContainer(...children: any[]): HTMLElement {
+        return this.createNode('div', { 
+            style: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }
+        }, ...children);
     },
     
     createSubheading(text: string, color: string = '#aaa'): HTMLElement {

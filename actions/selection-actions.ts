@@ -178,7 +178,7 @@ export const selectionActions: Pick<AppActions,
         App.ui.refreshLayers();
     },
 
-    loadSelection(layerIndex: number = 0, mode: 'alpha' | 'grayscale' = 'alpha', inverse: boolean = false) {
+    loadSelection(layerIndex: number = 0, mode: 'auto' | 'alpha' | 'grayscale' = 'auto', inverse: boolean = false) {
         const layer = App.state.layers[layerIndex];
         if (!layer) return;
 
@@ -191,7 +191,21 @@ export const selectionActions: Pick<AppActions,
         const maskData = mCtx.createImageData(layer.canvas.width, layer.canvas.height);
         const mData = maskData.data;
 
-        if (mode === 'alpha') {
+        let resolvedMode: 'alpha' | 'grayscale' = 'alpha';
+        if (mode === 'auto') {
+            let hasTransparency = false;
+            for (let i = 3; i < data.length; i += 4) {
+                if (data[i] < 255) {
+                    hasTransparency = true;
+                    break;
+                }
+            }
+            resolvedMode = hasTransparency ? 'alpha' : 'grayscale';
+        } else {
+            resolvedMode = mode;
+        }
+
+        if (resolvedMode === 'alpha') {
             for (let i = 0; i < data.length; i += 4) {
                 const a = data[i + 3];
                 mData[i] = 255;
@@ -273,7 +287,7 @@ export const selectionActions: Pick<AppActions,
         const activeLayer = App.utils.getActive();
         let selectedLayerIndex = activeLayer ? App.state.layers.indexOf(activeLayer) : 0;
         if (selectedLayerIndex < 0) selectedLayerIndex = 0;
-        let selectedMode: 'alpha' | 'grayscale' = 'alpha';
+        let selectedMode: 'auto' | 'alpha' | 'grayscale' = 'auto';
 
         const layerOptions = App.state.layers.map((l, idx) => ({
             value: idx,
@@ -290,6 +304,7 @@ export const selectionActions: Pick<AppActions,
         const radioGroup = UI.createRadioGroup({
             label: 'Load Mode',
             options: [
+                { value: 'auto', label: 'Auto (Detect)' },
                 { value: 'alpha', label: 'Alpha Channel' },
                 { value: 'grayscale', label: 'Grayscale Mask' }
             ],

@@ -16,6 +16,7 @@ Filters.register('spectral', {
     renderUI(container: HTMLElement, layer: Layer, hooks: any) {
         const state = {
             mode: 'spectrum',       // 'spectrum', 'radial', 'polar'
+            spectrumType: 'magnitude', // 'magnitude', 'real', 'imag', 'phase'
             channel: 'gray',        // 'gray', 'red', 'green', 'blue'
             analyzeDiff: false,     // Pre-process with Edge Detection
             logScale: true,         // Use Log Magnitude
@@ -27,19 +28,25 @@ Filters.register('spectral', {
             showJpegGrid: false,    // Overlay Grid markers
             gridW: 8,               // Grid Block Width (default 8 for JPEG)
             gridH: 8,               // Grid Block Height
-            angleMarker: 0          // Guide line for angle detection
+            angleMarker: 0,         // Guide line for angle detection
+            scaleMode: 'auto',      // 'auto', 'manual'
+            manualLimit: 10.0       // Custom clipping/limit value
         };
 
         const update = () => {
             const isPolar = state.mode === 'polar';
             const isSpectrum = state.mode === 'spectrum';
             const isKaiser = state.windowType === 'kaiser';
+            const isManualScale = state.scaleMode === 'manual';
             
             circularCheckbox.style.display = isPolar ? 'flex' : 'none';
             angleRow.style.display = isPolar ? 'flex' : 'none';
             jpegCheckbox.style.display = isSpectrum ? 'flex' : 'none';
             gridConfig.style.display = (isSpectrum && state.showJpegGrid) ? 'block' : 'none';
             betaRow.style.display = isKaiser ? 'flex' : 'none';
+            typeRow.style.display = isSpectrum ? 'flex' : 'none';
+            scaleRow.style.display = isSpectrum ? 'flex' : 'none';
+            limitRow.style.display = (isSpectrum && isManualScale) ? 'flex' : 'none';
             
             hooks.preview(state);
         };
@@ -73,6 +80,49 @@ Filters.register('spectral', {
             onChange: (v: any) => { state.channel = v; update(); }
         }));
 
+        const typeRow = UI.createSelectRow({
+            label: 'Spectrum Type',
+            options: [
+                { value: 'magnitude', text: 'Magnitude' },
+                { value: 'real', text: 'Cosine Component (Real)' },
+                { value: 'imag', text: 'Sine Component (Imaginary)' },
+                { value: 'phase', text: 'Phase Angle' }
+            ],
+            value: state.spectrumType,
+            onChange: (v: any) => { state.spectrumType = v; update(); }
+        });
+        container.appendChild(typeRow);
+
+        container.appendChild(UI.createSelectRow({
+            label: 'Window func',
+            options: [
+                { value: 'none', text: 'None (Rectangular)' },
+                { value: 'hann', text: 'Hanning (Hann)' },
+                { value: 'hamming', text: 'Hamming' },
+                { value: 'blackman', text: 'Blackman' },
+                { value: 'kaiser', text: 'Kaiser (Adjustable)' }
+            ],
+            value: state.windowType,
+            onChange: (v: any) => { state.windowType = v; update(); }
+        }));
+
+        const scaleRow = UI.createSelectRow({
+            label: 'Scale Mode',
+            options: [
+                { value: 'auto', text: 'Auto' },
+                { value: 'manual', text: 'Manual' }
+            ],
+            value: state.scaleMode,
+            onChange: (v: any) => { state.scaleMode = v; update(); }
+        });
+        container.appendChild(scaleRow);
+
+        const limitRow = UI.createSliderRow({
+            label: 'Manual Limit', min: 0.1, max: 100.0, step: 0.1, value: state.manualLimit,
+            onInput: (v: any) => { state.manualLimit = parseFloat(v); update(); }
+        });
+        container.appendChild(limitRow);
+
         container.appendChild(UI.createPaletteSelectRow({
             label: 'Colormap',
             value: state.cmap,
@@ -92,19 +142,6 @@ Filters.register('spectral', {
         container.appendChild(UI.createCheckbox({
             label: 'Log Scale', value: state.logScale,
             onChange: (v: any) => { state.logScale = v; update(); }
-        }));
-
-        container.appendChild(UI.createSelectRow({
-            label: 'Window Function',
-            options: [
-                { value: 'none', text: 'None (Rectangular)' },
-                { value: 'hann', text: 'Hanning (Hann)' },
-                { value: 'hamming', text: 'Hamming' },
-                { value: 'blackman', text: 'Blackman' },
-                { value: 'kaiser', text: 'Kaiser (Adjustable)' }
-            ],
-            value: state.windowType,
-            onChange: (v: any) => { state.windowType = v; update(); }
         }));
 
         const betaRow = UI.createSliderRow({
@@ -249,7 +286,8 @@ Filters.register('spectral', {
         const fftRes = Lib.fft.fft2d(input2D);
         const shifted = Lib.fft.shift(fftRes);
         
-        // Compute Magnitude
+        // Compute chosen spectrum component
+        const specType = params.spectrumType || 'magnitude';
         const mag = new Float32Array(w * h);
         let maxVal = 0;
 
@@ -257,16 +295,34 @@ Filters.register('spectral', {
             for(let x=0; x<w; x++) {
                 const re = shifted.re[y][x];
                 const im = shifted.im[y][x];
-                let m = Math.sqrt(re*re + im*im);
-                if (params.logScale) m = Math.log(1 + m);
+                let m = 0;
+                
+                if (specType === 'magnitude') {
+                    m = Math.sqrt(re*re + im*im);
+                } else if (specType === 'real') {
+                    m = re;
+                } else if (specType === 'imag') {
+                    m = im;
+                } else if (specType === 'phase') {
+                    m = Math.atan2(im, re);
+                }
+
+                if (params.logScale && specType !== 'phase') {
+                    if (m < 0) {
+                        m = -Math.log(1 - m);
+                    } else {
+                        m = Math.log(1 + m);
+                    }
+                }
                 mag[y*w + x] = m;
-                if (m > maxVal) maxVal = m;
+                const absM = Math.abs(m);
+                if (absM > maxVal) maxVal = absM;
             }
         }
 
         // Render Output
         if (params.mode === 'spectrum') {
-            this.renderSpectrum2D(data, mag, w, h, maxVal, params.contrast, params.showJpegGrid, params.gridW, params.gridH, params.cmap);
+            this.renderSpectrum2D(data, mag, w, h, maxVal, params.contrast, params.showJpegGrid, params.gridW, params.gridH, params.cmap, params);
         } 
         else if (params.mode === 'radial') {
             this.renderRadialProfile(data, mag, w, h, maxVal);
@@ -278,13 +334,30 @@ Filters.register('spectral', {
 
     // --- Renderers ---
 
-    renderSpectrum2D(this: any, data: Uint8ClampedArray, mag: Float32Array, w: number, h: number, maxVal: number, contrast: number, showGrid: boolean, gridW: number, gridH: number, cmap: PaletteName) {
+    renderSpectrum2D(this: any, data: Uint8ClampedArray, mag: Float32Array, w: number, h: number, maxVal: number, contrast: number, showGrid: boolean, gridW: number, gridH: number, cmap: PaletteName, params: any = {}) {
         data.fill(20); 
-        const scale = (1.0 / (maxVal || 1)) * contrast;
+        const specType = params.spectrumType || 'magnitude';
+        const isManual = params.scaleMode === 'manual';
+        const limitVal = isManual ? (params.manualLimit || 10.0) : maxVal;
+        
+        const scale = (1.0 / (limitVal || 1)) * contrast;
         const len = w * h;
         const pal = cmap || 'ironbow';
+        
         for (let i = 0; i < len; i++) {
-            let v = mag[i] * scale;
+            const m = mag[i];
+            let v = 0;
+            
+            if (specType === 'phase') {
+                // Phase ranges from -PI to PI; map to [0, 1]
+                v = (m / Math.PI) * 0.5 + 0.5;
+            } else if (specType === 'real' || specType === 'imag') {
+                // Real and imaginary can be signed; map centered around 0.5
+                v = (m * scale) * 0.5 + 0.5;
+            } else {
+                v = m * scale;
+            }
+            
             const rgba = Lib.plot.getColor(v, pal);
             const idx = i * 4;
             data[idx]   = rgba[0]; 

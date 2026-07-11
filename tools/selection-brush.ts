@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
+import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
 
 App.registerTool({
     id: 'select-brush',
@@ -84,43 +85,7 @@ App.registerTool({
         }
 
         const size = this.settings.size;
-        this.brushCanvas = document.createElement('canvas');
-        this.brushCanvas.width = size;
-        this.brushCanvas.height = size;
-        const bCtx = this.brushCanvas.getContext('2d')!;
-        const imgData = bCtx.createImageData(size, size);
-        const data = imgData.data;
-        const r = size / 2;
-        const hLimit = this.settings.hardness / 100;
-
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                const dx = (x + 0.5) - r;
-                const dy = (y + 0.5) - r;
-                const dist = Math.hypot(dx, dy);
-                let normDist = dist / r;
-
-                let alpha = 0;
-                if (this.settings.hardness === 100) {
-                    alpha = normDist <= 1.0 ? 1.0 : 0.0;
-                } else {
-                    if (normDist <= hLimit) {
-                        alpha = 1.0;
-                    } else if (normDist > 1.0) {
-                        alpha = 0.0;
-                    } else {
-                        alpha = 1.0 - (normDist - hLimit) / (1.0 - hLimit);
-                    }
-                }
-
-                const idx = (y * size + x) * 4;
-                data[idx] = 255;
-                data[idx + 1] = 255;
-                data[idx + 2] = 255;
-                data[idx + 3] = Math.round(alpha * 255);
-            }
-        }
-        bCtx.putImageData(imgData, 0, 0);
+        this.brushCanvas = createBrushCanvas(size, this.settings.hardness, '#ffffff');
 
         const spacingPx = 1;
         this.distanceAccumulator = spacingPx;
@@ -183,41 +148,11 @@ App.registerTool({
         if (isInitial) {
             stampAt(p1.x, p1.y);
         } else {
-            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            if (dist > 0) {
-                const dx = (p2.x - p1.x) / dist;
-                const dy = (p2.y - p1.y) / dist;
-
-                let d = this.distanceAccumulator;
-                while (d <= dist) {
-                    stampAt(p1.x + dx * d, p1.y + dy * d);
-                    d += spacingPx;
-                }
-                this.distanceAccumulator = d - dist;
-            }
+            this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
         }
     },
 
     drawUI() {
-        if (!this.mousePos) return;
-        const ctx = App.els.ctx;
-        ctx.save();
-        ctx.beginPath();
-        const l = App.utils.getActive();
-        let displayRadius = this.settings.size / 2;
-        if (l) {
-            displayRadius = (this.settings.size / 2) * (l.width / l.canvas.width);
-        }
-        ctx.arc(this.mousePos.x, this.mousePos.y, displayRadius, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(this.mousePos.x, this.mousePos.y, displayRadius, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.restore();
+        drawActiveBrushCircle(this.settings.size, { dashed: true });
     }
 });

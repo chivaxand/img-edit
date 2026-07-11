@@ -1,28 +1,175 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
+import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
+
+// Low-discrepancy Halton sequence generator for high-performance canvas sampling
+function halton(index: number, base: number): number {
+    let result = 0;
+    let f = 1 / base;
+    let i = index;
+    while (i > 0) {
+        result += f * (i % base);
+        i = Math.floor(i / base);
+        f = f / base;
+    }
+    return result;
+}
+
+// Samples color under the brush using Krita-like convergence logic
+function sampleCanvasColor(
+    ctx: CanvasRenderingContext2D,
+    cx: number, cy: number,
+    radius: number,
+    brushData: Uint8ClampedArray | null,
+    size: number,
+    fallbackColor: { r: number, g: number, b: number }
+): { r: number, g: number, b: number, a: number } {
+    if (radius <= 2) {
+        const img = ctx.getImageData(Math.round(cx), Math.round(cy), 1, 1);
+        const a = img.data[3];
+        if (a > 0) {
+            return { r: img.data[0], g: img.data[1], b: img.data[2], a };
+        }
+        return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
+    }
+
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    const rx = Math.round(cx - radius);
+    const ry = Math.round(cy - radius);
+    const rw = Math.round(radius * 2);
+    const rh = Math.round(radius * 2);
+
+    const sx = Math.max(0, Math.min(width - rw, rx));
+    const sy = Math.max(0, Math.min(height - rh, ry));
+    if (rw <= 0 || rh <= 0) {
+        return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
+    }
+
+    const imgData = ctx.getImageData(sx, sy, rw, rh);
+    const data = imgData.data;
+
+    let sumR = 0, sumG = 0, sumB = 0, sumA = 0;
+    let count = 0;
+    let alphaCount = 0;
+
+    const minSamples = Math.min(rw * rh, 64);
+    const maxSamples = Math.min(rw * rh, 256);
+
+    let lastR = 0, lastG = 0, lastB = 0, lastA = 0;
+
+    for (let i = 1; i <= maxSamples; i++) {
+        const hx = Math.floor(halton(i, 2) * rw);
+        const hy = Math.floor(halton(i, 3) * rh);
+
+        const dx = hx - radius;
+        const dy = hy - radius;
+        if (dx * dx + dy * dy <= radius * radius) {
+            const idx = (hy * rw + hx) * 4;
+            if (idx >= 0 && idx < data.length) {
+                let weight = 1;
+                if (brushData && size === rw) {
+                    weight = brushData[idx + 3] / 255;
+                }
+                const pixelAlpha = data[idx + 3] / 255;
+                const totalWeight = weight * pixelAlpha;
+
+                sumR += data[idx] * totalWeight;
+                sumG += data[idx + 1] * totalWeight;
+                sumB += data[idx + 2] * totalWeight;
+                sumA += data[idx + 3] * weight;
+                count += totalWeight;
+                alphaCount += weight;
+            }
+        }
+
+        // Convergence evaluation check
+        if (i >= minSamples && i % 16 === 0 && count > 0) {
+            const currR = sumR / count;
+            const currG = sumG / count;
+            const currB = sumB / count;
+            const currA = sumA / alphaCount;
+
+            if (i > minSamples) {
+                const diff = Math.abs(currR - lastR) + Math.abs(currG - lastG) + Math.abs(currB - lastB) + Math.abs(currA - lastA);
+                if (diff < 2) {
+                    break;
+                }
+            }
+            lastR = currR;
+            lastG = currG;
+            lastB = currB;
+            lastA = currA;
+        }
+    }
+
+    if (count > 0 && alphaCount > 0) {
+        return { r: sumR / count, g: sumG / count, b: sumB / count, a: sumA / alphaCount };
+    }
+    return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
+}
 
 App.registerTool({
     id: 'smudge',
     icon: '🧽',
     title: 'Smudge Tool (S)',
-    settings: { size: 30, hardness: 50, rate: 50, flow: 0, spacing: 5, noErasing: true },
+    settings: { 
+        size: 30, 
+        hardness: 50, 
+        rate: 50, 
+        colorRate: 0, 
+        smudgeRadius: 10, 
+        spacing: 5, 
+        smearAlpha: true,
+        mode: 'smearing'
+    },
     
     // Offscreen buffers
     brushData: null as Uint8ClampedArray | null,
     accumCanvas: null as HTMLCanvasElement | null,
     distanceAccumulator: 0,
+    activeColor: { r: 0, g: 0, b: 0, a: 1.0 },
     
+    drawUI() {
+        drawActiveBrushCircle(this.settings.size);
+    },
+
     onSelect(panel: HTMLElement) {
+        const radiusRow = UI.createSliderRow({ 
+            label: 'Smudge Radius',  min: 1,  max: 100, 
+            value: this.settings.smudgeRadius, 
+            onInput: (v: string) => this.settings.smudgeRadius = parseInt(v) 
+        });
+        const updateRadiusVisibility = (mode: string) => {
+            UI.toggle(radiusRow, mode === 'dulling');
+        };
+
+        panel.appendChild(UI.createSelectRow({
+            label: 'Mode',
+            options: [
+                { value: 'smearing', text: 'Smearing Mode' },
+                { value: 'dulling', text: 'Dulling Mode' }
+            ],
+            value: this.settings.mode,
+            onChange: (v: string) => {
+                this.settings.mode = v as 'smearing' | 'dulling';
+                updateRadiusVisibility(v);
+            }
+        }));
+
         panel.appendChild(UI.createSliderRow({ label: 'Size', min: 1, max: 200, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));
         panel.appendChild(UI.createSliderRow({ label: 'Hardness', min: 0, max: 100, value: this.settings.hardness, onInput: (v: string) => this.settings.hardness = parseInt(v) }));
-        panel.appendChild(UI.createSliderRow({ label: 'Rate', min: 0, max: 100, value: this.settings.rate, onInput: (v: string) => this.settings.rate = parseInt(v) }));
-        panel.appendChild(UI.createSliderRow({ label: 'Flow', min: 0, max: 100, value: this.settings.flow, onInput: (v: string) => this.settings.flow = parseInt(v) }));
+        panel.appendChild(UI.createSliderRow({ label: 'Smudge Rate', min: 0, max: 100, value: this.settings.rate, onInput: (v: string) => this.settings.rate = parseInt(v) }));
+        panel.appendChild(UI.createSliderRow({ label: 'Color Rate', min: 0, max: 100, value: this.settings.colorRate, onInput: (v: string) => this.settings.colorRate = parseInt(v) }));
+        panel.appendChild(radiusRow);
+        updateRadiusVisibility(this.settings.mode);
+
         panel.appendChild(UI.createSliderRow({ label: 'Spacing', min: 1, max: 100, value: this.settings.spacing, onInput: (v: string) => this.settings.spacing = parseInt(v) }));
         panel.appendChild(UI.createCheckbox({
-            label: 'No Erasing Effect',
-            value: this.settings.noErasing,
-            onChange: (v: boolean) => this.settings.noErasing = v
+            label: 'Smear Alpha (Transparency)',
+            value: this.settings.smearAlpha,
+            onChange: (v: boolean) => this.settings.smearAlpha = v
         }));
     },
     
@@ -56,38 +203,8 @@ App.registerTool({
         const size = this.settings.size;
         const r = size / 2;
 
-        const imgData = new ImageData(size, size);
-        const data = imgData.data;
-        const hLimit = this.settings.hardness / 100;
-        
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                const dx = (x + 0.5) - r;
-                const dy = (y + 0.5) - r;
-                const dist = Math.hypot(dx, dy);
-                const normDist = dist / r;
-                
-                let alpha = 0;
-                if (this.settings.hardness === 100) {
-                    alpha = normDist <= 1.0 ? 1.0 : 0.0;
-                } else {
-                    if (normDist <= hLimit) {
-                        alpha = 1.0;
-                    } else if (normDist > 1.0) {
-                        alpha = 0.0;
-                    } else {
-                        alpha = 1.0 - (normDist - hLimit) / (1.0 - hLimit);
-                    }
-                }
-                
-                const idx = (y * size + x) * 4;
-                data[idx] = 0;
-                data[idx + 1] = 0;
-                data[idx + 2] = 0;
-                data[idx + 3] = Math.round(alpha * 255);
-            }
-        }
-        this.brushData = imgData.data;
+        const brushCanvas = createBrushCanvas(size, this.settings.hardness);
+        this.brushData = brushCanvas.getContext('2d')!.getImageData(0, 0, size, size).data;
 
         // Prepare Accumulator Canvas
         this.accumCanvas = document.createElement('canvas');
@@ -98,6 +215,13 @@ App.registerTool({
         const clx = Math.max(0, Math.min(l.canvas.width - 1, Math.round(lx)));
         const cly = Math.max(0, Math.min(l.canvas.height - 1, Math.round(ly)));
         const centerPixel = l.ctx.getImageData(clx, cly, 1, 1).data;
+
+        this.activeColor = {
+            r: centerPixel[0],
+            g: centerPixel[1],
+            b: centerPixel[2],
+            a: centerPixel[3] / 255
+        };
 
         const sx = Math.round(lx - r);
         const sy = Math.round(ly - r);
@@ -169,12 +293,10 @@ App.registerTool({
         }
         
         const accumCtx = this.accumCanvas!.getContext('2d')!;
-        const accumImg = accumCtx.getImageData(0, 0, size, size);
-        const accumData = accumImg.data;
         
         const rate = this.settings.rate / 100;
-        const flow = this.settings.flow / 100;
-        const noErasing = this.settings.noErasing;
+        const colorRate = this.settings.colorRate / 100;
+        const smearAlpha = this.settings.smearAlpha;
         
         const fgColor = App.state.fg;
         const fgRgb = App.utils.hexToRgb(fgColor) || { r: 0, g: 0, b: 0 };
@@ -211,110 +333,184 @@ App.registerTool({
                     }
                 }
             }
+
+            let accumImg: ImageData | null = null;
+            let accumData: Uint8ClampedArray | null = null;
+
+            if (this.settings.mode === 'smearing') {
+                const img = accumCtx.getImageData(0, 0, size, size);
+                accumImg = img;
+                accumData = img.data;
+            }
+
+            let activeColorLocal = { ...this.activeColor };
+
+            if (this.settings.mode === 'dulling') {
+                const sampled = sampleCanvasColor(
+                    layer.ctx,
+                    px, py,
+                    this.settings.smudgeRadius,
+                    this.brushData,
+                    size,
+                    this.activeColor
+                );
+
+                const a_canvas = sampled.a / 255;
+                const r_canvas = sampled.r;
+                const g_canvas = sampled.g;
+                const b_canvas = sampled.b;
+
+                const a_brush = this.activeColor.a;
+                const r_brush = this.activeColor.r;
+                const g_brush = this.activeColor.g;
+                const b_brush = this.activeColor.b;
+
+                const w_brush = rate * a_brush;
+                const w_canvas = (1 - rate) * a_canvas;
+                const w_total = w_brush + w_canvas;
+
+                let next_r = r_brush;
+                let next_g = g_brush;
+                let next_b = b_brush;
+
+                if (w_total > 0.001) {
+                    next_r = (w_brush * r_brush + w_canvas * r_canvas) / w_total;
+                    next_g = (w_brush * g_brush + w_canvas * g_canvas) / w_total;
+                    next_b = (w_brush * b_brush + w_canvas * b_canvas) / w_total;
+                }
+
+                let next_a = rate * a_brush + (1 - rate) * a_canvas;
+                if (!smearAlpha) {
+                    next_a = Math.max(a_brush, a_canvas);
+                }
+
+                if (colorRate > 0) {
+                    const w_next = (1 - colorRate) * next_a;
+                    const w_fg = colorRate;
+                    const w_paint = w_next + w_fg;
+
+                    if (w_paint > 0.001) {
+                        next_r = (w_next * next_r + w_fg * fgRgb.r) / w_paint;
+                        next_g = (w_next * next_g + w_fg * fgRgb.g) / w_paint;
+                        next_b = (w_next * next_b + w_fg * fgRgb.b) / w_paint;
+                    }
+                    next_a = next_a * (1 - colorRate) + colorRate;
+                }
+
+                activeColorLocal.r = next_r;
+                activeColorLocal.g = next_g;
+                activeColorLocal.b = next_b;
+                activeColorLocal.a = next_a;
+
+                this.activeColor = { ...activeColorLocal };
+            } else {
+                for (let i = 0; i < size * size * 4; i += 4) {
+                    const r_canvas = currentData[i];
+                    const g_canvas = currentData[i+1];
+                    const b_canvas = currentData[i+2];
+                    const a_canvas = currentData[i+3] / 255;
+
+                    const r_acc = accumData![i];
+                    const g_acc = accumData![i+1];
+                    const b_acc = accumData![i+2];
+                    const a_acc = accumData![i+3] / 255;
+
+                    const w_acc = rate * a_acc;
+                    const w_canvas = (1 - rate) * a_canvas;
+                    const w_total = w_acc + w_canvas;
+
+                    let next_r = r_acc;
+                    let next_g = g_acc;
+                    let next_b = b_acc;
+
+                    if (w_total > 0.001) {
+                        next_r = (w_acc * r_acc + w_canvas * r_canvas) / w_total;
+                        next_g = (w_acc * g_acc + w_canvas * g_canvas) / w_total;
+                        next_b = (w_acc * b_acc + w_canvas * b_canvas) / w_total;
+                    }
+
+                    let next_a = rate * a_acc + (1 - rate) * a_canvas;
+                    if (!smearAlpha) {
+                        next_a = Math.max(a_acc, a_canvas);
+                    }
+
+                    if (colorRate > 0) {
+                        const w_next = (1 - colorRate) * next_a;
+                        const w_fg = colorRate;
+                        const w_paint = w_next + w_fg;
+
+                        if (w_paint > 0.001) {
+                            next_r = (w_next * next_r + w_fg * fgRgb.r) / w_paint;
+                            next_g = (w_next * next_g + w_fg * fgRgb.g) / w_paint;
+                            next_b = (w_next * next_b + w_fg * fgRgb.b) / w_paint;
+                        }
+                        next_a = next_a * (1 - colorRate) + colorRate;
+                    }
+
+                    accumData![i]   = Math.round(Math.max(0, Math.min(255, next_r)));
+                    accumData![i+1] = Math.round(Math.max(0, Math.min(255, next_g)));
+                    accumData![i+2] = Math.round(Math.max(0, Math.min(255, next_b)));
+                    accumData![i+3] = Math.round(Math.max(0, Math.min(255, next_a * 255)));
+                }
+                accumCtx.putImageData(accumImg!, 0, 0);
+            }
             
             for (let i = 0; i < size * size * 4; i += 4) {
-                const r_acc = accumData[i];
-                const g_acc = accumData[i+1];
-                const b_acc = accumData[i+2];
-                const a_acc = accumData[i+3];
-                
-                const r_I = currentData[i];
-                const g_I = currentData[i+1];
-                const b_I = currentData[i+2];
-                const a_I = currentData[i+3];
-                
-                const a_acc_f = a_acc / 255;
-                const a_I_f = a_I / 255;
-                
-                const w_acc = rate * a_acc_f;
-                const w_I = (1 - rate) * a_I_f;
-                const w_total = w_acc + w_I;
-                
-                let next_r = r_acc;
-                let next_g = g_acc;
-                let next_b = b_acc;
-                
-                if (w_total > 0.001) {
-                    next_r = Math.max(0, Math.min(255, (w_acc * r_acc + w_I * r_I) / w_total));
-                    next_g = Math.max(0, Math.min(255, (w_acc * g_acc + w_I * g_I) / w_total));
-                    next_b = Math.max(0, Math.min(255, (w_acc * b_acc + w_I * b_I) / w_total));
-                }
-                
-                let next_a_f = rate * a_acc_f + (1 - rate) * a_I_f;
-                if (noErasing) {
-                    // Prevent canvas transparency from decreasing if the user set noErasing
-                    next_a_f = Math.max(a_I_f, next_a_f);
-                }
-                
-                let paint_r = next_r;
-                let paint_g = next_g;
-                let paint_b = next_b;
-                let paint_a_f = next_a_f;
-                
-                if (flow > 0) {
-                    const w_next = (1 - flow) * next_a_f;
-                    const w_fg = flow;
-                    const w_paint = w_next + w_fg;
-                    
-                    if (w_paint > 0.001) {
-                        paint_r = Math.max(0, Math.min(255, (w_next * next_r + w_fg * fgRgb.r) / w_paint));
-                        paint_g = Math.max(0, Math.min(255, (w_next * next_g + w_fg * fgRgb.g) / w_paint));
-                        paint_b = Math.max(0, Math.min(255, (w_next * next_b + w_fg * fgRgb.b) / w_paint));
-                    }
-                    paint_a_f = next_a_f * (1 - flow) + flow;
-                }
-                
-                // Save updated state back into the Accumulator
-                accumData[i]   = Math.round(paint_r);
-                accumData[i+1] = Math.round(paint_g);
-                accumData[i+2] = Math.round(paint_b);
-                accumData[i+3] = Math.round(paint_a_f * 255);
-                
-                // Blend with original canvas using Brush and Selection masks via premultiplied alpha
                 let mask_f = this.brushData![i + 3] / 255;
                 if (selData) {
                     mask_f *= (selData[i + 3] / 255);
                 }
                 
                 if (mask_f > 0) {
-                    const pre_r = paint_r * paint_a_f * mask_f + r_I * a_I_f * (1 - mask_f);
-                    const pre_g = paint_g * paint_a_f * mask_f + g_I * a_I_f * (1 - mask_f);
-                    const pre_b = paint_b * paint_a_f * mask_f + b_I * a_I_f * (1 - mask_f);
-                    const final_a_f = paint_a_f * mask_f + a_I_f * (1 - mask_f);
+                    const r_canvas = currentData[i];
+                    const g_canvas = currentData[i+1];
+                    const b_canvas = currentData[i+2];
+                    const a_canvas = currentData[i+3] / 255;
+
+                    let paint_r = 0, paint_g = 0, paint_b = 0, paint_a = 0;
+
+                    if (this.settings.mode === 'dulling') {
+                        paint_r = activeColorLocal.r;
+                        paint_g = activeColorLocal.g;
+                        paint_b = activeColorLocal.b;
+                        paint_a = activeColorLocal.a;
+                    } else {
+                        paint_r = accumData![i];
+                        paint_g = accumData![i+1];
+                        paint_b = accumData![i+2];
+                        paint_a = accumData![i+3] / 255;
+                    }
+
+                    const pre_r = paint_r * paint_a * mask_f + r_canvas * a_canvas * (1 - mask_f);
+                    const pre_g = paint_g * paint_a * mask_f + g_canvas * a_canvas * (1 - mask_f);
+                    const pre_b = paint_b * paint_a * mask_f + b_canvas * a_canvas * (1 - mask_f);
                     
-                    let final_r = 0, final_g = 0, final_b = 0;
-                    if (final_a_f > 0.001) {
-                        final_r = pre_r / final_a_f;
-                        final_g = pre_g / final_a_f;
-                        final_b = pre_b / final_a_f;
+                    const final_a = paint_a * mask_f + a_canvas * (1 - mask_f);
+                    
+                    let final_r = r_canvas;
+                    let g_final = g_canvas;
+                    let b_final = b_canvas;
+                    
+                    if (final_a > 0.001) {
+                        final_r = pre_r / final_a;
+                        g_final = pre_g / final_a;
+                        b_final = pre_b / final_a;
                     }
                     
-                    currentData[i]   = Math.round(final_r);
-                    currentData[i+1] = Math.round(final_g);
-                    currentData[i+2] = Math.round(final_b);
-                    currentData[i+3] = Math.round(final_a_f * 255);
+                    currentData[i]   = Math.round(Math.max(0, Math.min(255, final_r)));
+                    currentData[i+1] = Math.round(Math.max(0, Math.min(255, g_final)));
+                    currentData[i+2] = Math.round(Math.max(0, Math.min(255, b_final)));
+                    currentData[i+3] = Math.round(Math.max(0, Math.min(255, final_a * 255)));
                 }
             }
             
-            accumCtx.putImageData(accumImg, 0, 0);
             layer.ctx.putImageData(currentImg, sx, sy);
         };
 
         if (isInitial) {
             stampAt(p1.x, p1.y);
         } else {
-            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            if (dist > 0) {
-                const dx = (p2.x - p1.x) / dist;
-                const dy = (p2.y - p1.y) / dist;
-                
-                let d = this.distanceAccumulator;
-                while (d <= dist) {
-                    stampAt(p1.x + dx * d, p1.y + dy * d);
-                    d += spacingPx;
-                }
-                this.distanceAccumulator = d - dist;
-            }
+            this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
         }
     }
 });

@@ -5,7 +5,8 @@ import { selectionActions } from './selection-actions';
 import { transformActions } from '~/filters/transform/flip-rotate-skew';
 import { layerCanvasSizeActions } from '~/filters/transform/layer-canvas-size';
 import { layerResizeActions } from '~/filters/transform/layer-resize';
-import { scriptActions } from './script';
+import { scriptActions } from './macro-runner';
+import { clipboardActions } from './clipboard-actions';
 
 // Import side-effects for GIF and JPEG export systems
 import './gif-export';
@@ -18,7 +19,8 @@ const allActions: AppActions = {
     ...transformActions,
     ...layerCanvasSizeActions,
     ...layerResizeActions,
-    ...scriptActions
+    ...scriptActions,
+    ...clipboardActions
 };
 
 Object.assign(App.actions, allActions);

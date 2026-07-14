@@ -44,7 +44,7 @@ Filters.register('grid', {
         };
 
         // --- Level 1 Settings ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Level 1 Grid'));
+        container.appendChild(UI.createSubheading('Level 1 Grid'));
         container.appendChild(UI.createCheckbox({
             label: 'Enable Level 1',
             value: state.l1Enabled,
@@ -91,7 +91,7 @@ Filters.register('grid', {
         container.appendChild(l1Group);
 
         // --- Level 2 Settings ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Level 2 Grid'));
+        container.appendChild(UI.createSubheading('Level 2 Grid'));
         container.appendChild(UI.createCheckbox({
             label: 'Enable Level 2',
             value: state.l2Enabled,
@@ -138,7 +138,7 @@ Filters.register('grid', {
         container.appendChild(l2Group);
 
         // --- Global Settings ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Global Settings'));
+        container.appendChild(UI.createSubheading('Global Settings'));
         container.appendChild(UI.createSliderRow({
             label: 'Offset X',
             min: 0,

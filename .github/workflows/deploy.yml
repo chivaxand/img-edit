@@ -39,6 +39,19 @@ jobs:
       - name: Create dist directory
         run: mkdir -p dist
 
+      - name: Prepare Production Build
+        run: |
+          echo "Removing test files..."
+          rm -rf tests/
+          rm -f filters/test-ui.ts
+          
+          echo "Removing test imports from main.ts..."
+          sed -i '/import.*tests\/index/d' main.ts
+          sed -i '/window.*Tests = Tests/d' main.ts
+          
+          echo "Regenerating module indexes..."
+          node gen-code.js
+
       - name: Compile and Bundle JS
         run: |
           tsc --noEmit

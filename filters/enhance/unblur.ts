@@ -91,7 +91,7 @@ Filters.register('unblur', {
 
         // --- OBD Estimated Kernel Visualization ---
         container.appendChild(UI.createNode('div', {className:'popup-separator'}, ''));
-        container.appendChild(UI.createNode('div', {className:'popup-subtitle'}, 'Estimated Kernel (OBD)'));
+        container.appendChild(UI.createSubheading('Estimated Kernel (OBD)'));
 
         // Canvas (initially hidden)
         const kernelCanvas = document.createElement('canvas');

@@ -96,7 +96,7 @@ Filters.register('chromakey', {
         container.appendChild(UI.createCheckbox({ label: 'Show Alpha Mask (Black/White)', value: state.showMask, onChange: (v: boolean) => { state.showMask = v; update(); } }));
 
         container.appendChild(UI.createNode('div', {className:'popup-separator'}, ''));
-        container.appendChild(UI.createNode('div', {className:'popup-subtitle'}, 'Tolerance'));
+        container.appendChild(UI.createSubheading('Tolerance'));
 
         // Sliders
         const hslControls = [
@@ -114,13 +114,13 @@ Filters.register('chromakey', {
         container.appendChild(UI.createSliderRow({ label: 'Smoothness', min: 0, max: 50, value: state.smoothness, onInput: (v: string) => { state.smoothness = parseInt(v); update(); } }));
 
         container.appendChild(UI.createNode('div', {className:'popup-separator'}, ''));
-        container.appendChild(UI.createNode('div', {className:'popup-subtitle'}, 'Matte Refinement'));
+        container.appendChild(UI.createSubheading('Matte Refinement'));
 
         container.appendChild(UI.createSliderRow({ label: 'Clip Black', min: 0, max: 100, value: state.clipB, onInput: (v: string) => { state.clipB = parseInt(v); update(); } }));
         container.appendChild(UI.createSliderRow({ label: 'Clip White', min: 0, max: 100, value: state.clipW, onInput: (v: string) => { state.clipW = parseInt(v); update(); } }));
         
         // Spill Correction (HSL Only)
-        const spillHead = UI.createNode('div', {className:'popup-subtitle'}, 'Spill Correction');
+        const spillHead = UI.createSubheading('Spill Correction');
         const spillControls = [
             spillHead,
             UI.createSliderRow({ label: 'Spill Reduce', min: 0, max: 100, value: state.spill, onInput: (v: string) => { state.spill = parseInt(v); update(); } }),

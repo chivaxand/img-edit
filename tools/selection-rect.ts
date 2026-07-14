@@ -92,6 +92,8 @@ App.registerTool({
             return;
         }
 
+        App.actions.saveState();
+
         // Initialize mask if needed
         if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
             App.state.selection.layerId = l.id;

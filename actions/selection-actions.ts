@@ -2,16 +2,57 @@ import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
 
 export const selectionActions: Pick<AppActions,
-    'deselect' | 'deleteSelection' | 'inverseSelection' | 'updateSelectionOutline' |
+    'deselect' | 'selectAll' | 'deleteSelection' | 'inverseSelection' | 'updateSelectionOutline' |
     'saveSelection' | 'loadSelection' | 'openSaveSelectionDialog' | 'openLoadSelectionDialog'
 > = {
     deselect() {
+        if (App.state.selection.active) {
+            App.actions.saveState();
+        }
         App.state.selection.active = false;
         App.state.selection.mask = null;
         App.state.selection.ctx = null;
         App.state.selection.layerId = null;
         App.state.selection.outline = null;
         App.recordAction("api.selectNone();");
+        App.render();
+    },
+
+    selectAll() {
+        const l = App.utils.getActive();
+        if (!l) return;
+        App.actions.saveState();
+
+        if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
+            App.state.selection.layerId = l.id;
+            App.state.selection.mask = document.createElement('canvas');
+            App.state.selection.mask.width = l.canvas.width;
+            App.state.selection.mask.height = l.canvas.height;
+            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
+            App.state.selection.outline = null;
+        }
+
+        const mCtx = App.state.selection.ctx!;
+        const imgData = l.ctx.getImageData(0, 0, l.canvas.width, l.canvas.height);
+        const data = imgData.data;
+        const maskData = mCtx.createImageData(l.canvas.width, l.canvas.height);
+        const mData = maskData.data;
+
+        // Copy alpha channel values directly to select layer content boundary
+        for (let i = 0; i < data.length; i += 4) {
+            const a = data[i + 3];
+            mData[i] = 255;
+            mData[i + 1] = 255;
+            mData[i + 2] = 255;
+            mData[i + 3] = a;
+        }
+
+        mCtx.putImageData(maskData, 0, 0);
+
+        App.state.selection.active = true;
+        App.state.selection.outline = null;
+        App.actions.updateSelectionOutline();
+        App.recordAction("api.selectAll();");
         App.render();
     },
 
@@ -32,6 +73,7 @@ export const selectionActions: Pick<AppActions,
     },
 
     inverseSelection() {
+        App.actions.saveState();
         const sel = App.state.selection;
         if (!sel.active || !sel.mask) {
             const l = App.utils.getActive();
@@ -181,6 +223,8 @@ export const selectionActions: Pick<AppActions,
     loadSelection(layerIndex: number = 0, mode: 'auto' | 'alpha' | 'grayscale' = 'auto', inverse: boolean = false) {
         const layer = App.state.layers[layerIndex];
         if (!layer) return;
+
+        App.actions.saveState();
 
         const maskCanvas = document.createElement('canvas');
         maskCanvas.width = layer.canvas.width;

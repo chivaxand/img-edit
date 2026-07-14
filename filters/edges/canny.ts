@@ -35,14 +35,14 @@ Filters.register('canny', {
         };
 
         // --- UI Construction ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Noise Reduction'));
+        container.appendChild(UI.createSubheading('Noise Reduction'));
         container.appendChild(UI.createSliderRow({
             label: 'Sigma', min: 0.1, max: 10.0, step: 0.1, value: state.sigma,
             onInput: (v: string) => { state.sigma = parseFloat(v); update(); }
         }));
 
         // --- Gradient Calculation ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Gradient Calculation'));
+        container.appendChild(UI.createSubheading('Gradient Calculation'));
         container.appendChild(UI.createSelectRow({
             label: 'Operator',
             options: [
@@ -64,7 +64,7 @@ Filters.register('canny', {
         container.appendChild(apertureRow);
 
         // --- Hysteresis ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Hysteresis Thresholding'));
+        container.appendChild(UI.createSubheading('Hysteresis Thresholding'));
         container.appendChild(UI.createSliderRow({
             label: 'High Thresh', min: 0, max: 255, step: 1, value: state.highThreshold,
             onInput: (v: string) => { state.highThreshold = parseFloat(v); update(); }

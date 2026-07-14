@@ -2,6 +2,7 @@ import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Filters, FilterContext } from '~/filters';
+import { Lib } from '~/libs/index';
 
 Filters.register('free-transform', {
     name: 'Free Transform',
@@ -67,114 +68,32 @@ Filters.register('free-transform', {
             const dst8 = dstData.data;
 
             const algo = p.interpolation || 'bilinear';
-
-            const getPixel = (sx: number, sy: number, c: number) => {
-                if (sx < 0) sx = 0; else if (sx >= origW) sx = origW - 1;
-                if (sy < 0) sy = 0; else if (sy >= origH) sy = origH - 1;
-                return src8[(sy * origW + sx) * 4 + c];
+            const interpolationMap: Record<string, string> = {
+                'nearest': 'nearest',
+                'bilinear': 'bilinear',
+                'bicubic': 'bicubic',
+                'lanczos': 'lanczos3'
             };
 
-            const sampleNearest = (x: number, y: number, c: number) => {
-                const sx = Math.round(x);
-                const sy = Math.round(y);
-                return getPixel(sx, sy, c);
-            };
-
-            const sampleBilinear = (x: number, y: number, c: number) => {
-                const x0 = Math.floor(x);
-                const y0 = Math.floor(y);
-                const x1 = x0 + 1;
-                const y1 = y0 + 1;
-                const dx = x - x0;
-                const dy = y - y0;
-                const top = getPixel(x0, y0, c) * (1 - dx) + getPixel(x1, y0, c) * dx;
-                const bot = getPixel(x0, y1, c) * (1 - dx) + getPixel(x1, y1, c) * dx;
-                return top * (1 - dy) + bot * dy;
-            };
-
-            const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => {
-                return 0.5 * ((2 * p1) + (-p0 + p2) * t + 
-                    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + 
-                    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-            };
-
-            const sampleBicubic = (x: number, y: number, c: number) => {
-                const x0 = Math.floor(x);
-                const y0 = Math.floor(y);
-                const dx = x - x0;
-                const dy = y - y0;
-                const r_m1 = cubic(getPixel(x0 - 1, y0 - 1, c), getPixel(x0, y0 - 1, c), getPixel(x0 + 1, y0 - 1, c), getPixel(x0 + 2, y0 - 1, c), dx);
-                const r_0  = cubic(getPixel(x0 - 1, y0,     c), getPixel(x0, y0,     c), getPixel(x0 + 1, y0,     c), getPixel(x0 + 2, y0,     c), dx);
-                const r_1  = cubic(getPixel(x0 - 1, y0 + 1, c), getPixel(x0, y0 + 1, c), getPixel(x0 + 1, y0 + 1, c), getPixel(x0 + 2, y0 + 1, c), dx);
-                const r_2  = cubic(getPixel(x0 - 1, y0 + 2, c), getPixel(x0, y0 + 2, c), getPixel(x0 + 1, y0 + 2, c), getPixel(x0 + 2, y0 + 2, c), dx);
-                const val = cubic(r_m1, r_0, r_1, r_2, dy);
-                return val < 0 ? 0 : (val > 255 ? 255 : val);
-            };
-
-            const l_sinc = (v: number) => {
-                if (v === 0) return 1;
-                const pv = Math.PI * v;
-                return Math.sin(pv) / pv;
-            };
-
-            const l_weight = (v: number) => {
-                if (v < 0) v = -v;
-                if (v >= 3) return 0;
-                return l_sinc(v) * l_sinc(v / 3);
-            };
-
-            const sampleLanczos = (x: number, y: number, c: number) => {
-                const x0 = Math.floor(x);
-                const y0 = Math.floor(y);
-                let sum = 0, weightSum = 0;
-                for (let j = -2; j <= 3; j++) {
-                    const sy = y0 + j;
-                    const wy = l_weight(y - sy);
-                    if (wy === 0) continue;
-                    for (let i = -2; i <= 3; i++) {
-                        const sx = x0 + i;
-                        const wx = l_weight(x - sx);
-                        const w = wx * wy;
-                        if (w === 0) continue;
-                        sum += getPixel(sx, sy, c) * w;
-                        weightSum += w;
-                    }
-                }
-                if (weightSum === 0) return 0;
-                const val = sum / weightSum;
-                return val < 0 ? 0 : (val > 255 ? 255 : val);
-            };
-
-            const sampler = algo === 'nearest' ? sampleNearest :
-                            algo === 'bicubic' ? sampleBicubic :
-                            algo === 'lanczos' ? sampleLanczos : sampleBilinear;
-
-            for (let v = 0; v < newH; v++) {
-                const y_warped = v + minY;
-                for (let u = 0; u < newW; u++) {
-                    const x_warped = u + minX;
-
+            Lib.image.deform(
+                { data: src8, width: origW, height: origH },
+                { data: dst8, width: newW, height: newH },
+                (x: number, y: number) => {
+                    const x_warped = x + minX;
+                    const y_warped = y + minY;
                     const denom = g * x_warped + h * y_warped + 1;
-                    const idx = (v * newW + u) * 4;
-
                     if (Math.abs(denom) < 0.0001) {
-                        dst8[idx] = dst8[idx+1] = dst8[idx+2] = dst8[idx+3] = 0;
-                        continue;
+                        return { u: -999999, v: -999999 };
                     }
-
                     const x_src = (a * x_warped + b * y_warped + c) / denom;
                     const y_src = (d * x_warped + e * y_warped + f) / denom;
-
-                    if (x_src < -1 || x_src > origW || y_src < -1 || y_src > origH) {
-                        dst8[idx] = dst8[idx+1] = dst8[idx+2] = dst8[idx+3] = 0;
-                    } else {
-                        dst8[idx]   = sampler(x_src, y_src, 0);
-                        dst8[idx+1] = sampler(x_src, y_src, 1);
-                        dst8[idx+2] = sampler(x_src, y_src, 2);
-                        dst8[idx+3] = sampler(x_src, y_src, 3);
-                    }
+                    return { u: x_src, v: y_src };
+                }, {
+                    interpolation: (interpolationMap[algo] || 'bilinear') as any,
+                    boundary: 'constant',
+                    antialiasing: !!p.antialiasing
                 }
-            }
+            );
 
             ctx.putImageData(dstData, 0, 0);
         }
@@ -205,7 +124,8 @@ Filters.register('free-transform', {
             origX: l.x,
             origY: l.y,
             origCanvas: origCanvas,
-            interpolation: 'bilinear'
+            interpolation: 'bilinear',
+            antialiasing: false
         };
 
         const canvasContainer = UI.createNode('div', {
@@ -281,13 +201,19 @@ Filters.register('free-transform', {
         root.appendChild(UI.createSelectRow({
             label: 'Interpolation',
             options: [
+                { value: 'nearest', text: 'Nearest' },
                 { value: 'bilinear', text: 'Bilinear' },
                 { value: 'bicubic', text: 'Bicubic' },
-                { value: 'lanczos', text: 'Lanczos-3' },
-                { value: 'nearest', text: 'Nearest' }
+                { value: 'lanczos', text: 'Lanczos-3' }
             ],
             value: p.interpolation,
             onChange: (v: string) => { p.interpolation = v; update(); }
+        }));
+
+        root.appendChild(UI.createCheckbox({
+            label: 'Antialiasing (Super-sampling)',
+            value: p.antialiasing,
+            onChange: (v: boolean) => { p.antialiasing = v; update(); }
         }));
 
         let showGrid = false;
@@ -372,7 +298,7 @@ Filters.register('free-transform', {
                     e.preventDefault();
                     window.addEventListener('mousemove', onMouseMove);
                     window.addEventListener('mouseup', onMouseUp);
-                } else if (isPointInPolygon({ x: mx, y: my }, viewCorners)) {
+                } else if (Lib.mesh.isPointInPolygon({ x: mx, y: my }, viewCorners)) {
                     isDraggingAll = true;
                     e.preventDefault();
                     window.addEventListener('mousemove', onMouseMove);
@@ -422,7 +348,7 @@ Filters.register('free-transform', {
             if (onControlPoint) {
                 intCanvas.style.cursor = 'move';
             } else {
-                if (isPointInPolygon({ x: mx, y: my }, viewCorners)) {
+                if (Lib.mesh.isPointInPolygon({ x: mx, y: my }, viewCorners)) {
                     intCanvas.style.cursor = 'move';
                 } else {
                     intCanvas.style.cursor = 'default';
@@ -643,18 +569,6 @@ function getInverseHomography(src: {x:number, y:number}[], dst: {x:number, y:num
     }
 
     return solveLinearSystem(A, B);
-}
-
-function isPointInPolygon(p: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = polygon[i].x, yi = polygon[i].y;
-        const xj = polygon[j].x, yj = polygon[j].y;
-        const intersect = ((yi > p.y) !== (yj > p.y))
-            && (p.x < (xj - xi) * (p.y - yi) / (yj - yi || 1) + xi);
-        if (intersect) inside = !inside;
-    }
-    return inside;
 }
 
 function drawGridOverlay(ctx: CanvasRenderingContext2D, width: number, height: number, cols: number = 3, rows: number = 3) {

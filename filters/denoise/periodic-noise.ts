@@ -715,7 +715,7 @@ export const PeriodicNoiseWorkspace = {
 
         // --- Construct Workspace Controls (Sidebar) ---
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Active Tool Selection'));
+        ws.sidebar.appendChild(UI.createSubheading('Active Tool Selection'));
 
         // Dynamic parameters containers
         const autoPanel = UI.createNode('div', { style: 'display: none;' });
@@ -786,7 +786,7 @@ export const PeriodicNoiseWorkspace = {
         ws.sidebar.appendChild(gridPanel);
 
         // Standard Workspace Actions Panel
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Actions & History'));
+        ws.sidebar.appendChild(UI.createSubheading('Actions & History'));
 
         const undoBtn = UI.createButton({
             label: 'Undo Edit', id: 'pn-btn-undo', className: 'btn cancel-btn',
@@ -816,7 +816,7 @@ export const PeriodicNoiseWorkspace = {
         ws.sidebar.appendChild(UI.createNode('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px;' }, undoBtn, redoBtn));
         ws.sidebar.appendChild(clearBtn);
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'FFT Viewport Controls'));
+        ws.sidebar.appendChild(UI.createSubheading('FFT Viewport Controls'));
 
         const zoomInBtn = UI.createButton({ label: 'Zoom +', className: 'btn', onClick: () => { leftViewport.zoom = Math.min(25, leftViewport.zoom * 1.25); leftViewport.onDraw!(); } });
         const zoomOutBtn = UI.createButton({ label: 'Zoom -', className: 'btn', onClick: () => { leftViewport.zoom = Math.max(0.2, leftViewport.zoom / 1.25); leftViewport.onDraw!(); } });
@@ -847,7 +847,7 @@ export const PeriodicNoiseWorkspace = {
             onChange: (v) => { windowType = v; computeFourierSpectrum(); drawFourier(); }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:10px;' }, 'Preview Config'));
+        ws.sidebar.appendChild(UI.createSubheading('Preview Config'));
 
         ws.sidebar.appendChild(UI.createCheckbox({
             label: 'Real-time Live Preview', value: livePreview,

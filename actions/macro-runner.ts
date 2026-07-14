@@ -18,6 +18,7 @@ export interface IScriptAPI {
     mergeActiveLayerDown(): void;
     moveActiveLayer(dir: number): void;
     selectNone(): void;
+    selectAll(): void;
     selectLayerAlpha(): void;
     deleteSelection(): void;
     inverseSelection(): void;
@@ -111,6 +112,9 @@ export const ScriptAPI: IScriptAPI = {
     // --- Selection Operations ---
     selectNone() {
         App.actions.deselect();
+    },
+    selectAll() {
+        App.actions.selectAll();
     },
     selectLayerAlpha() {
         const l = App.utils.getActive();

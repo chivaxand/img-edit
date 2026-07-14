@@ -3,10 +3,11 @@ import { Lib } from '~/libs/index';
 // Flatten a 2D matrix to 1D array
 const flatten = (M: number[][]) => M.reduce((acc, row) => acc.concat(row), []);
 
-// Compare two arrays (or flattened matrices) with tolerance
+// Compare two arrays (or flattened matrices) with tolerance and explicit NaN safety
 function isClose(actual: number[] | Float32Array, expected: number[] | Float32Array, tolerance = 1e-4) {
     if (actual.length !== expected.length) return false;
     for (let i = 0; i < actual.length; i++) {
+        if (isNaN(actual[i]) || isNaN(expected[i])) return false;
         if (Math.abs(actual[i] - expected[i]) > tolerance) return false;
     }
     return true;
@@ -42,7 +43,8 @@ export function runLinalgTests(runner: { test: (name: string, fn: () => any) => 
         add, subtract, scale, transpose, identity, clone, 
         multiply, inverse, svd, randomizedSvd, solveCG, 
         solveBiCGStab, spsolve, solveHomography, solve, pinv, det,
-        lu, solveLU, norm, cholesky, solveCholesky, eigenSymmetric, covariance, crossProduct3d
+        lu, solveLU, norm, cholesky, solveCholesky, ldlt, solveLDLT,
+        eigenSymmetric, covariance, crossProduct3d, pca
     } = Lib.linalg;
 
     // Map localized test calls to global runner
@@ -190,6 +192,31 @@ export function runLinalgTests(runner: { test: (name: string, fn: () => any) => 
         const xExpected = solve(A, b);
         const solveOk = isClose(x, xExpected, 1e-5);
         return { pass: decompOk && solveOk, details: { L, x, xExpected } };
+    });
+
+    test("LDLT Decomposition & Solver (Symmetric Matrix)", () => {
+        const A = [
+            [4, 12, -16],
+            [12, 37, -43],
+            [-16, -43, 98]
+        ];
+        const b = [1, 2, 3];
+        const { L, D, P } = ldlt(A);
+        // Reconstruct P^T * A * P as L * D * L^T
+        const n = A.length;
+        const PAP = Array.from({ length: n }, (_, i) =>
+            Array.from({ length: n }, (_, j) => A[P[i]][P[j]])
+        );
+        const D_mat = Array.from({ length: n }, (_, i) =>
+            Array.from({ length: n }, (_, j) => (i === j ? D[i] : 0.0))
+        );
+        const LD = multiply(L, D_mat);
+        const LD_Lt = multiply(LD, transpose(L));
+        const decompOk = isClose(flatten(PAP), flatten(LD_Lt), 1e-5);
+        const x = solveLDLT(A, b);
+        const xExpected = solve(A, b);
+        const solveOk = isClose(x, xExpected, 1e-5);
+        return { pass: decompOk && solveOk, details: { L, D, P, x, xExpected } };
     });
     console.groupEnd();
 
@@ -379,6 +406,22 @@ export function runLinalgTests(runner: { test: (name: string, fn: () => any) => 
         const vecOk = vectorsMatch(Av0, lv0, 1e-4);
         return { pass: valsOk && vecOk, details: { values, expectedVals } };
     });
+
+    test("Principal Component Analysis (PCA)", () => {
+        const pts = [
+            [2.5, 2.4], [0.5, 0.7], [2.2, 2.9], [1.9, 2.2], [3.1, 3.0],
+            [2.3, 2.7], [2.0, 1.6], [1.0, 1.1], [1.5, 1.6], [1.1, 0.9]
+        ];
+        const { components, explainedVariance, mean } = pca(pts, 2);
+        const meanOk = isClose(mean, [1.81, 1.91], 1e-4);
+        const varianceOk = isClose(explainedVariance, [1.28402, 0.04908], 1e-4);
+        const comp0Ok = vectorsMatch(components[0], [0.67787, 0.73518], 1e-4);
+        const comp1Ok = vectorsMatch(components[1], [0.73518, -0.67787], 1e-4);
+        return { 
+            pass: meanOk && varianceOk && comp0Ok && comp1Ok, 
+            details: { meanOk, varianceOk, comp0Ok, comp1Ok, components, explainedVariance } 
+        };
+    });
     console.groupEnd();
 
     // ==========================================
@@ -456,6 +499,29 @@ export function runLinalgTests(runner: { test: (name: string, fn: () => any) => 
             2, 0, 1,
             0, 2, 1,
             0, 0, 1
+        ];
+        return { pass: isClose(H_flat, expected, 1e-4), details: { actual: H_flat, expected } };
+    });
+
+    test("Homography Matrix: Non-Affine Projective Transform", () => {
+        const src = [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 1, y: 1 },
+            { x: 0, y: 1 }
+        ];
+        const dst = [
+            { x: 0, y: 0 },
+            { x: 2, y: 0.5 },
+            { x: 2, y: 1.5 },
+            { x: 0, y: 2 }
+        ];
+        const H = solveHomography(src, dst);
+        const H_flat = flatten(H);
+        const expected = [
+            4, 0, 0,
+            1, 2, 0,
+            1, 0, 1
         ];
         return { pass: isClose(H_flat, expected, 1e-4), details: { actual: H_flat, expected } };
     });

@@ -34,11 +34,11 @@ Filters.register('whitebalance', {
         container.appendChild(UI.createRow('Picker', UI.createNode('div', {}, swatch, valLabel)));
 
         // Sliders
-        container.appendChild(UI.createNode('div', {className:'popup-subtitle'}, 'Global Temperature'));
+        container.appendChild(UI.createSubheading('Global Temperature'));
         container.appendChild(UI.createSliderRow({ label: 'Temp', min: -100, max: 100, value: state.temp, onInput: v => { state.temp = parseInt(v); update(); } }));
         container.appendChild(UI.createSliderRow({ label: 'Tint', min: -100, max: 100, value: state.tint, onInput: v => { state.tint = parseInt(v); update(); } }));
 
-        container.appendChild(UI.createNode('div', {className:'popup-subtitle'}, 'Manual Channels'));
+        container.appendChild(UI.createSubheading('Manual Channels'));
         
         // Helper for colored labels
         const coloredRow = (lbl: string, val: number, color: string, setter: (v: string) => void) => {

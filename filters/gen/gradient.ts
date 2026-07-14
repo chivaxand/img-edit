@@ -1258,7 +1258,7 @@ export const GradientGeneratorWorkspace = {
         };
 
         // --- Sidebar UI Controllers ---
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Pattern & Preview Settings'));
+        ws.sidebar.appendChild(UI.createSubheading('Pattern & Preview Settings'));
 
         ws.sidebar.appendChild(UI.createSelectRow({
             label: 'Pattern',
@@ -1288,7 +1288,7 @@ export const GradientGeneratorWorkspace = {
             }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Selected Stop Properties'));
+        ws.sidebar.appendChild(UI.createSubheading('Selected Stop Properties'));
 
         // Location position slider
         const posRow = UI.createSliderRow({
@@ -1405,7 +1405,7 @@ export const GradientGeneratorWorkspace = {
         };
 
         // --- Sampler Controls Panel ---
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Get Gradient From Image'));
+        ws.sidebar.appendChild(UI.createSubheading('Get Gradient From Image'));
 
         ws.sidebar.appendChild(UI.createSelectRow({
             label: 'Algorithm',
@@ -1453,7 +1453,7 @@ export const GradientGeneratorWorkspace = {
         }));
 
         // --- Code Export Panel ---
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Export Code'));
+        ws.sidebar.appendChild(UI.createSubheading('Export Code'));
 
         ws.sidebar.appendChild(UI.createSelectRow({
             label: 'Format',

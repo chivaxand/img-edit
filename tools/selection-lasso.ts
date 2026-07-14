@@ -724,7 +724,6 @@ App.registerTool({
         const type = this.settings.type || 'free';
 
         if (type === 'free') {
-            App.actions.saveState();
             App.state.isDrawing = true;
             this.points = [pos];
         } else {
@@ -820,7 +819,6 @@ App.registerTool({
         const ly = App.utils.toLocal(l, pos.y, 'y');
 
         if (this.draggingSeedIndex !== null) {
-            // Dragging an existing anchor forces precision tracking unconditionally
             const snapped = { x: lx, y: ly }; 
             
             this.seeds[this.draggingSeedIndex] = snapped;
@@ -1034,7 +1032,6 @@ App.registerTool({
         for (let i = 0; i < this.seeds.length; i++) {
             const gp = this.toGlobal(activeL, this.seeds[i]);
             if (i === 0) {
-                // First anchor is green in Krita, indicating snap/close area
                 ctx.fillStyle = 'rgba(40, 167, 69, 0.8)';
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
             } else if (this.hoveredSeedIndex === i) {
@@ -1069,6 +1066,8 @@ App.registerTool({
     finishSelection() {
         const l = App.utils.getActive();
         if (!l) return;
+
+        App.actions.saveState();
 
         if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
             App.state.selection.layerId = l.id;

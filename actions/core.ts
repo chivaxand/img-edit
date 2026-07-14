@@ -4,7 +4,7 @@ import { UI } from '~/ui';
 export const coreActions: Pick<AppActions, 
     'saveState' | 'undo' | 'resizeCanvas' | 'fitCanvasToLayers' | 
     'setTool' | 'setColor' | 'download' | 'setZoom' | 
-    'stepZoom' | 'exportBase64'
+    'stepZoom' | 'exportBase64' | 'closeImage'
 > = {
     saveState() { App.history.push(App.state); },
 
@@ -13,6 +13,27 @@ export const coreActions: Pick<AppActions,
         if (!h) return;
         App.state.width = h.w; App.state.height = h.h; App.state.layers = h.layers;
         if (!App.state.layers.find(l => l.id === App.state.activeLayerId)) App.state.activeLayerId = App.state.layers[0]?.id;
+        
+        // Restore selection state safely
+        if (h.selection) {
+            App.state.selection.active = h.selection.active;
+            App.state.selection.layerId = h.selection.layerId;
+            if (h.selection.mask) {
+                App.state.selection.mask = h.selection.mask;
+                App.state.selection.ctx = h.selection.mask.getContext('2d');
+            } else {
+                App.state.selection.mask = null;
+                App.state.selection.ctx = null;
+            }
+            App.state.selection.outline = null; // Triggers rebuild on next render
+        } else {
+            App.state.selection.active = false;
+            App.state.selection.mask = null;
+            App.state.selection.ctx = null;
+            App.state.selection.layerId = null;
+            App.state.selection.outline = null;
+        }
+
         App.actions.resizeCanvas(h.w, h.h);
         App.actions.setActiveLayer(App.state.activeLayerId!);
     },
@@ -110,5 +131,34 @@ export const coreActions: Pick<AppActions,
             <div class="popup-actions"><button class="btn cancel-btn" onclick="App.popup.close()">Close</button></div>
         `);
         App.popup!.show();
+    },
+
+    closeImage() {
+        if (!confirm("Are you sure you want to close the current image? Unsaved changes will be lost.")) return;
+
+        // Reset history, layers, and selections
+        App.history.stack = [];
+        App.state.layers = [];
+        App.state.activeLayerId = null;
+        App.state.zoom = 1;
+
+        App.state.selection.active = false;
+        App.state.selection.mask = null;
+        App.state.selection.ctx = null;
+        App.state.selection.layerId = null;
+        App.state.selection.outline = null;
+
+        // Restore canvas framework to default size 800x600 and seed default empty layer
+        App.actions.resizeCanvas(800, 600);
+        const firstLayer = App.actions.createLayer("Layer 1");
+        if (firstLayer) {
+            App.state.layers = [firstLayer];
+            App.actions.setActiveLayer(firstLayer.id);
+        }
+        App.actions.setTool('move');
+
+        App.emit('layers:structure');
+        App.emit('layer:props');
+        App.render();
     }
 };

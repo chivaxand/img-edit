@@ -115,6 +115,11 @@ interface UICanvasOpts {
     [k: string]: any;
 }
 
+interface UILayoutOpts {
+    style?: string | Partial<CSSStyleDeclaration>;
+    className?: string;
+}
+
 interface UIInterface {
     createNode<K extends keyof HTMLElementTagNameMap>(
         tag: K,
@@ -143,6 +148,10 @@ interface UIInterface {
     createSection(title: string, ...children: any[]): HTMLElement;
     createContainer(...children: any[]): HTMLElement;
     createSubheading(text: string, color?: string): HTMLElement;
+    createExpandableSection(opts: { title: string; initiallyExpanded?: boolean; style?: string | Partial<CSSStyleDeclaration> }, ...children: any[]): HTMLElement;
+    createGrid(cols: number, children: any[], opts?: UILayoutOpts): HTMLElement;
+    createFlexStack(orientation: 'horizontal' | 'vertical', children: any[], opts?: UILayoutOpts): HTMLElement;
+    createSplitRow(leftContent: HTMLElement, rightContent: HTMLElement, opts?: UILayoutOpts): HTMLElement;
 }
 
 export const UI: UIInterface = {
@@ -420,25 +429,74 @@ export const UI: UIInterface = {
     },
 
     createSection(title: string, ...children: any[]): HTMLElement {
-        return this.createNode('div', { 
-            style: { display: 'flex', flexDirection: 'column', gap: '5px', border: '1px solid #444', padding: '10px', borderRadius: '4px', marginBottom: '10px' }
-        },
-            this.createNode('div', { 
-                style: { fontWeight: 'bold', fontSize: '12px', color: '#aaa', marginBottom: '5px' }
-            }, title),
+        return this.createNode('div', { style: { display: 'flex', flexDirection: 'column', gap: '5px', border: '1px solid #444', padding: '10px', borderRadius: '4px', marginBottom: '10px' } },
+            this.createNode('div', { style: { fontWeight: 'bold', fontSize: '12px', color: '#aaa', marginBottom: '5px' } }, title),
             ...children
         );
     },
 
     createContainer(...children: any[]): HTMLElement {
-        return this.createNode('div', { 
-            style: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }
-        }, ...children);
+        return this.createNode('div', { style: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' } }, ...children);
     },
     
-    createSubheading(text: string, color: string = '#aaa'): HTMLElement {
-        return this.createNode('div', {
-            style: { fontWeight: 'bold', color: color, fontSize: '11px',  marginTop: '5px', marginBottom: '2px' }
-        }, text);
+    createSubheading(text: string, color: string = '#eee'): HTMLElement {
+        return this.createNode('div', { style: { fontWeight: 'bold', color: color, fontSize: '12px',  marginTop: '5px', marginBottom: '10px' } }, text);
+    },
+
+    createExpandableSection(opts: { title: string; initiallyExpanded?: boolean; style?: string | Partial<CSSStyleDeclaration> }, ...children: any[]): HTMLElement {
+        const details = this.createNode('details', { style: { border: '1px solid #444', borderRadius: '4px', backgroundColor: '#1c1c1c', marginBottom: '10px', padding: '5px' } }) as HTMLDetailsElement;
+        if (opts.initiallyExpanded) { details.open = true; }
+        const summary = this.createNode('summary', { textContent: opts.title, style: { fontWeight: 'bold', fontSize: '12px', color: '#aaa', cursor: 'pointer', padding: '5px 8px', outline: 'none', userSelect: 'none' } });
+        const contentContainer = this.createNode('div', { style: { padding: '8px 5px 5px 5px', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #333', marginTop: '5px' } });
+        children.forEach(c => { if (c) { contentContainer.appendChild(c instanceof Node ? c : document.createTextNode(String(c))); } });
+        details.appendChild(summary);
+        details.appendChild(contentContainer);
+        if (opts.style) {
+            if (typeof opts.style === 'string') {
+                details.style.cssText += opts.style;
+            } else {
+                Object.assign(details.style, opts.style);
+            }
+        }
+        return details;
+    },
+
+    createGrid(cols: number, children: any[], opts?: UILayoutOpts): HTMLElement {
+        const grid = this.createNode('div', { style: { display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: '8px', width: '100%', marginBottom: '10px' } });
+        children.forEach(c => { if (c) grid.appendChild(c instanceof Node ? c : document.createTextNode(String(c))); });
+        if (opts) {
+            if (opts.style) {
+                if (typeof opts.style === 'string') grid.style.cssText += opts.style;
+                else Object.assign(grid.style, opts.style);
+            }
+            if (opts.className) grid.classList.add(opts.className);
+        }
+        return grid;
+    },
+
+    createFlexStack(orientation: 'horizontal' | 'vertical', children: any[], opts?: UILayoutOpts): HTMLElement {
+        const isRow = orientation === 'horizontal';
+        const stack = this.createNode('div', { style: { display: 'flex', flexDirection: isRow ? 'row' : 'column', alignItems: isRow ? 'center' : 'stretch', justifyContent: isRow ? 'flex-start' : 'initial', gap: '6px', width: '100%', marginBottom: '10px' } });
+        children.forEach(c => { if (c) stack.appendChild(c instanceof Node ? c : document.createTextNode(String(c))); });
+        if (opts) {
+            if (opts.style) {
+                if (typeof opts.style === 'string') stack.style.cssText += opts.style;
+                else Object.assign(stack.style, opts.style);
+            }
+            if (opts.className) stack.classList.add(opts.className);
+        }
+        return stack;
+    },
+
+    createSplitRow(leftContent: HTMLElement, rightContent: HTMLElement, opts?: UILayoutOpts): HTMLElement {
+        const row = this.createNode('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', width: '100%', marginBottom: '8px' } }, leftContent, rightContent);
+        if (opts) {
+            if (opts.style) {
+                if (typeof opts.style === 'string') row.style.cssText += opts.style;
+                else Object.assign(row.style, opts.style);
+            }
+            if (opts.className) row.classList.add(opts.className);
+        }
+        return row;
     }
 };

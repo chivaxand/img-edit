@@ -4,6 +4,173 @@ import { Layer } from '~/layers';
 import { Lib } from '~/libs/index';
 import { Filters, FilterContext } from '~/filters';
 
+Filters.register('resize', {
+    name: 'Resize Layer',
+    mode: 'unified',
+    menu: {
+        path: 'Transform',
+        label: 'Resize...',
+        order: 1
+    },
+
+    apply(context: FilterContext) {
+        const l = context.layer;
+        const state = context.values;
+        const origW = state.origW !== undefined ? state.origW : l.width;
+        const origH = state.origH !== undefined ? state.origH : l.height;
+        const origX = state.origX !== undefined ? state.origX : l.x;
+        const origY = state.origY !== undefined ? state.origY : l.y;
+
+        // Calculate Scale Factors
+        const sx = state.w / origW;
+        const sy = state.h / origH;
+
+        // Resize Active Layer
+        _resizeLayerObj(l, state.w, state.h, state.algo, state.lobes);
+
+        // Handle Others & Positions
+        if (state.resizeOthers) {
+            // Scale Active Layer Position
+            l.x = Math.round(origX * sx);
+            l.y = Math.round(origY * sy);
+
+            App.state.layers.forEach(layer => {
+                if (layer === l) return;
+                
+                // Scale Content
+                const nw = Math.max(1, Math.round(layer.width * sx));
+                const nh = Math.max(1, Math.round(layer.height * sy));
+                _resizeLayerObj(layer, nw, nh, state.algo, state.algo === 'lanczos' ? state.lobes : undefined);
+                
+                // Scale Position (Preserve relative layout)
+                layer.x = Math.round(layer.x * sx);
+                layer.y = Math.round(layer.y * sy);
+            });
+        }
+
+        // Resize Canvas
+        if (state.resizeCanvas) {
+            const newCW = Math.round(App.state.width * sx);
+            const newCH = Math.round(App.state.height * sy);
+            App.actions.resizeCanvas(newCW, newCH);
+        }
+    },
+    
+    renderUI(root: HTMLElement, l: Layer, hooks: any) {
+        const state = {
+            w: l.width,
+            h: l.height,
+            resizeCanvas: false,
+            resizeOthers: false,
+            constrain: true,
+            algo: 'bicubic',  // nearest, bilinear, bicubic, lanczos, fft
+            lobes: 4,          // for Lanczos
+            origW: l.width,
+            origH: l.height,
+            origX: l.x,
+            origY: l.y
+        };
+        const ratio = l.width / l.height;
+
+        const update = () => hooks.preview(state);
+
+        // Helper to sync inputs
+        const updateInputs = (source: string) => {
+            if (state.constrain) {
+                if (source === 'w') {
+                    state.h = Math.round(state.w / ratio);
+                    (hInp as HTMLInputElement).value = state.h.toString();
+                } else if (source === 'h') {
+                    state.w = Math.round(state.h * ratio);
+                    (wInp as HTMLInputElement).value = state.w.toString();
+                }
+            }
+        };
+
+        const wInp = UI.createInput('number', { value: state.w }, (t: HTMLInputElement) => {
+            state.w = parseFloat(t.value) || 1;
+            updateInputs('w');
+            update();
+        });
+
+        const hInp = UI.createInput('number', { value: state.h }, (t: HTMLInputElement) => {
+            state.h = parseFloat(t.value) || 1;
+            updateInputs('h');
+            update();
+        });
+
+        const constrainCheck = UI.createCheckbox({
+            label: 'Constrain Proportions',
+            value: state.constrain,
+            onChange: (v: boolean) => {
+                state.constrain = v;
+                if (state.constrain) {
+                    updateInputs('w');
+                    update();
+                }
+            }
+        });
+
+        root.appendChild(UI.createRow('Width', wInp));
+        root.appendChild(UI.createRow('Height', hInp));
+        root.appendChild(UI.createRow('', constrainCheck));
+        
+        root.appendChild(UI.createNode('div', {className:'popup-separator'}));
+
+        // Algorithm Selection
+        const algoSelect = UI.createSelectRow({
+            label: 'Algorithm',
+            options: [
+                { value: 'nearest', text: 'Nearest Neighbor' },
+                { value: 'bilinear', text: 'Bilinear' },
+                { value: 'bicubic', text: 'Bicubic' },
+                { value: 'lanczos', text: 'Lanczos (Sinc)' },
+                { value: 'fft', text: 'FFT' }
+            ],
+            value: state.algo,
+            onChange: (v: string) => {
+                state.algo = v;
+                lobesRow.style.display = v === 'lanczos' ? 'flex' : 'none';
+                update();
+            }
+        });
+        root.appendChild(algoSelect);
+
+        // Lobes (Lanczos only)
+        const lobesRow = UI.createSliderRow({
+            label: 'Lobes', min: 1, max: 10, step: 1, value: state.lobes,
+            onInput: (v: string) => {
+                state.lobes = parseInt(v);
+                update();
+            }
+        });
+        lobesRow.style.display = state.algo === 'lanczos' ? 'flex' : 'none';
+        root.appendChild(lobesRow);
+
+        root.appendChild(UI.createNode('div', {className:'popup-separator'}));
+
+        root.appendChild(UI.createCheckbox({
+            label: 'Resize Canvas (Scale)',
+            value: state.resizeCanvas,
+            onChange: (v: boolean) => {
+                state.resizeCanvas = v;
+                update();
+            }
+        }));
+
+        root.appendChild(UI.createCheckbox({
+            label: 'Resize Other Layers & Positions',
+            value: state.resizeOthers,
+            onChange: (v: boolean) => {
+                state.resizeOthers = v;
+                update();
+            }
+        }));
+
+        update();
+    }
+});
+
 const _resizeFilters = {
     bicubic(x: number) {
         const a = -0.5; // Catmull-Rom (a = -0.5)
@@ -268,173 +435,6 @@ function _resizeLayerObj(l: Layer, w: number, h: number, algo: string = 'bilinea
     
     l.canvas = nc; l.width = w; l.height = h; l.ctx = ctx;
 }
-
-Filters.register('resize', {
-    name: 'Resize Layer',
-    mode: 'unified',
-    menu: {
-        path: 'Transform',
-        label: 'Resize...',
-        order: 1
-    },
-
-    apply(context: FilterContext) {
-        const l = context.layer;
-        const state = context.values;
-        const origW = state.origW !== undefined ? state.origW : l.width;
-        const origH = state.origH !== undefined ? state.origH : l.height;
-        const origX = state.origX !== undefined ? state.origX : l.x;
-        const origY = state.origY !== undefined ? state.origY : l.y;
-
-        // Calculate Scale Factors
-        const sx = state.w / origW;
-        const sy = state.h / origH;
-
-        // Resize Active Layer
-        _resizeLayerObj(l, state.w, state.h, state.algo, state.lobes);
-
-        // Handle Others & Positions
-        if (state.resizeOthers) {
-            // Scale Active Layer Position
-            l.x = Math.round(origX * sx);
-            l.y = Math.round(origY * sy);
-
-            App.state.layers.forEach(layer => {
-                if (layer === l) return;
-                
-                // Scale Content
-                const nw = Math.max(1, Math.round(layer.width * sx));
-                const nh = Math.max(1, Math.round(layer.height * sy));
-                _resizeLayerObj(layer, nw, nh, state.algo, state.algo === 'lanczos' ? state.lobes : undefined);
-                
-                // Scale Position (Preserve relative layout)
-                layer.x = Math.round(layer.x * sx);
-                layer.y = Math.round(layer.y * sy);
-            });
-        }
-
-        // Resize Canvas
-        if (state.resizeCanvas) {
-            const newCW = Math.round(App.state.width * sx);
-            const newCH = Math.round(App.state.height * sy);
-            App.actions.resizeCanvas(newCW, newCH);
-        }
-    },
-    
-    renderUI(root: HTMLElement, l: Layer, hooks: any) {
-        const state = {
-            w: l.width,
-            h: l.height,
-            resizeCanvas: false,
-            resizeOthers: false,
-            constrain: true,
-            algo: 'lanczos',  // nearest, bilinear, bicubic, lanczos, fft
-            lobes: 4,          // for Lanczos
-            origW: l.width,
-            origH: l.height,
-            origX: l.x,
-            origY: l.y
-        };
-        const ratio = l.width / l.height;
-
-        const update = () => hooks.preview(state);
-
-        // Helper to sync inputs
-        const updateInputs = (source: string) => {
-            if (state.constrain) {
-                if (source === 'w') {
-                    state.h = Math.round(state.w / ratio);
-                    (hInp as HTMLInputElement).value = state.h.toString();
-                } else if (source === 'h') {
-                    state.w = Math.round(state.h * ratio);
-                    (wInp as HTMLInputElement).value = state.w.toString();
-                }
-            }
-        };
-
-        const wInp = UI.createInput('number', { value: state.w }, (t: HTMLInputElement) => {
-            state.w = parseFloat(t.value) || 1;
-            updateInputs('w');
-            update();
-        });
-
-        const hInp = UI.createInput('number', { value: state.h }, (t: HTMLInputElement) => {
-            state.h = parseFloat(t.value) || 1;
-            updateInputs('h');
-            update();
-        });
-
-        const constrainCheck = UI.createCheckbox({
-            label: 'Constrain Proportions',
-            value: state.constrain,
-            onChange: (v: boolean) => {
-                state.constrain = v;
-                if (state.constrain) {
-                    updateInputs('w');
-                    update();
-                }
-            }
-        });
-
-        root.appendChild(UI.createRow('Width', wInp));
-        root.appendChild(UI.createRow('Height', hInp));
-        root.appendChild(UI.createRow('', constrainCheck));
-        
-        root.appendChild(UI.createNode('div', {className:'popup-separator'}));
-
-        // Algorithm Selection
-        const algoSelect = UI.createSelectRow({
-            label: 'Algorithm',
-            options: [
-                { value: 'nearest', text: 'Nearest Neighbor' },
-                { value: 'bilinear', text: 'Bilinear' },
-                { value: 'bicubic', text: 'Bicubic' },
-                { value: 'lanczos', text: 'Lanczos (Sinc)' },
-                { value: 'fft', text: 'FFT' }
-            ],
-            value: state.algo,
-            onChange: (v: string) => {
-                state.algo = v;
-                lobesRow.style.display = v === 'lanczos' ? 'flex' : 'none';
-                update();
-            }
-        });
-        root.appendChild(algoSelect);
-
-        // Lobes (Lanczos only)
-        const lobesRow = UI.createSliderRow({
-            label: 'Lobes', min: 1, max: 10, step: 1, value: state.lobes,
-            onInput: (v: string) => {
-                state.lobes = parseInt(v);
-                update();
-            }
-        });
-        lobesRow.style.display = state.algo === 'lanczos' ? 'flex' : 'none';
-        root.appendChild(lobesRow);
-
-        root.appendChild(UI.createNode('div', {className:'popup-separator'}));
-
-        root.appendChild(UI.createCheckbox({
-            label: 'Resize Canvas (Scale)',
-            value: state.resizeCanvas,
-            onChange: (v: boolean) => {
-                state.resizeCanvas = v;
-                update();
-            }
-        }));
-
-        root.appendChild(UI.createCheckbox({
-            label: 'Resize Other Layers & Positions',
-            value: state.resizeOthers,
-            onChange: (v: boolean) => {
-                state.resizeOthers = v;
-                update();
-            }
-        }));
-
-        update();
-    }
-});
 
 export const layerResizeActions: Pick<AppActions, 'openResizeDialog'> = {
     openResizeDialog() {

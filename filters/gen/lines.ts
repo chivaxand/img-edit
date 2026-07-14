@@ -72,7 +72,7 @@ Filters.register('lines', {
         }));
 
         // --- Colors ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Pattern Colors'));
+        container.appendChild(UI.createSubheading('Pattern Colors'));
 
         container.appendChild(UI.createColorRow({
             label: 'Color 1 (Line/Square)',
@@ -101,7 +101,7 @@ Filters.register('lines', {
         }));
 
         // --- Placement & Blending ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Global Settings'));
+        container.appendChild(UI.createSubheading('Global Settings'));
 
         container.appendChild(UI.createSliderRow({
             label: 'Offset X',

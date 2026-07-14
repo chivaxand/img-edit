@@ -2,6 +2,7 @@ import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Filters, FilterContext } from '~/filters';
+import { Lib } from '~/libs/index';
 
 Filters.register('skew-rotate', {
     name: 'Skew / Rotate',
@@ -74,70 +75,13 @@ Filters.register('skew-rotate', {
             const cx_src = origW / 2;
             const cy_src = origH / 2;
 
-            const getPixel = (sx: number, sy: number, c: number) => {
-                if (sx < 0) sx = 0; else if (sx >= origW) sx = origW - 1;
-                if (sy < 0) sy = 0; else if (sy >= origH) sy = origH - 1;
-                return src8[(sy * origW + sx) * 4 + c];
-            };
+            const antialiasing = !!p.antialiasing;
 
-            const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => {
-                return 0.5 * ((2 * p1) + (-p0 + p2) * t + 
-                    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + 
-                    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-            };
-
-            const sampleBicubic = (x: number, y: number, c: number) => {
-                const x0 = Math.floor(x);
-                const y0 = Math.floor(y);
-                const dx = x - x0;
-                const dy = y - y0;
-                const r_m1 = cubic(getPixel(x0 - 1, y0 - 1, c), getPixel(x0, y0 - 1, c), getPixel(x0 + 1, y0 - 1, c), getPixel(x0 + 2, y0 - 1, c), dx);
-                const r_0  = cubic(getPixel(x0 - 1, y0,     c), getPixel(x0, y0,     c), getPixel(x0 + 1, y0,     c), getPixel(x0 + 2, y0,     c), dx);
-                const r_1  = cubic(getPixel(x0 - 1, y0 + 1, c), getPixel(x0, y0 + 1, c), getPixel(x0 + 1, y0 + 1, c), getPixel(x0 + 2, y0 + 1, c), dx);
-                const r_2  = cubic(getPixel(x0 - 1, y0 + 2, c), getPixel(x0, y0 + 2, c), getPixel(x0 + 1, y0 + 2, c), getPixel(x0 + 2, y0 + 2, c), dx);
-                const val = cubic(r_m1, r_0, r_1, r_2, dy);
-                return val < 0 ? 0 : (val > 255 ? 255 : val);
-            };
-
-            const l_sinc = (v: number) => {
-                if (v === 0) return 1;
-                const pv = Math.PI * v;
-                return Math.sin(pv) / pv;
-            };
-
-            const l_weight = (v: number) => {
-                if (v < 0) v = -v;
-                if (v >= 3) return 0;
-                return l_sinc(v) * l_sinc(v / 3);
-            };
-
-            const sampleLanczos = (x: number, y: number, c: number) => {
-                const x0 = Math.floor(x);
-                const y0 = Math.floor(y);
-                let sum = 0, weightSum = 0;
-                for (let j = -2; j <= 3; j++) {
-                    const sy = y0 + j;
-                    const wy = l_weight(y - sy);
-                    if (wy === 0) continue;
-                    for (let i = -2; i <= 3; i++) {
-                        const sx = x0 + i;
-                        const wx = l_weight(x - sx);
-                        const w = wx * wy;
-                        if (w === 0) continue;
-                        sum += getPixel(sx, sy, c) * w;
-                        weightSum += w;
-                    }
-                }
-                if (weightSum === 0) return 0;
-                const val = sum / weightSum;
-                return val < 0 ? 0 : (val > 255 ? 255 : val);
-            };
-
-            const sampler = algo === 'bicubic' ? sampleBicubic : sampleLanczos;
-
-            for (let v = 0; v < newH; v++) {
-                const y0 = (v + minY) - cy_src;
-                for (let u = 0; u < newW; u++) {
+            Lib.image.deform(
+                { data: src8, width: origW, height: origH },
+                { data: dst8, width: newW, height: newH },
+                (u: number, v: number) => {
+                    const y0 = (v + minY) - cy_src;
                     const x0 = (u + minX) - cx_src;
 
                     const x1 = x0 * cos + y0 * sin;
@@ -153,20 +97,16 @@ Filters.register('skew-rotate', {
                     const x3 = x2 / scaleX;
                     const y3 = y2 / scaleY;
 
-                    const x_src = x3 + cx_src;
-                    const y_src = y3 + cy_src;
-
-                    const idx = (v * newW + u) * 4;
-                    if (x_src < -1 || x_src > origW || y_src < -1 || y_src > origH) {
-                        dst8[idx] = dst8[idx+1] = dst8[idx+2] = dst8[idx+3] = 0;
-                    } else {
-                        dst8[idx]   = sampler(x_src, y_src, 0);
-                        dst8[idx+1] = sampler(x_src, y_src, 1);
-                        dst8[idx+2] = sampler(x_src, y_src, 2);
-                        dst8[idx+3] = sampler(x_src, y_src, 3);
-                    }
+                    return {
+                        u: x3 + cx_src,
+                        v: y3 + cy_src
+                    };
+                }, {
+                    interpolation: algo === 'lanczos' ? 'lanczos3' : 'bicubic',
+                    boundary: 'constant',
+                    antialiasing
                 }
-            }
+            );
 
             ctx.putImageData(dstData, 0, 0);
         } else {
@@ -215,7 +155,8 @@ Filters.register('skew-rotate', {
             skewX: 0,
             skewY: 0,
             smooth: true,
-            interpolation: 'bilinear'
+            interpolation: 'bilinear',
+            antialiasing: false
         };
 
         const canvasContainer = UI.createNode('div', {
@@ -318,6 +259,12 @@ Filters.register('skew-rotate', {
             ],
             value: p.interpolation,
             onChange: (v: string) => { p.interpolation = v; p.smooth = v === 'bilinear'; update(); }
+        }));
+
+        root.appendChild(UI.createCheckbox({
+            label: 'Antialiasing (Super-sampling)',
+            value: p.antialiasing,
+            onChange: (v: boolean) => { p.antialiasing = v; update(); }
         }));
 
         let activeHandle: 'right' | 'top' | 'rotate' | null = null;

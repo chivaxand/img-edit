@@ -2,6 +2,7 @@ import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { App } from '~/app';
+import { Lib } from '~/libs/index';
 
 interface WarpPin {
     id: string;
@@ -160,91 +161,6 @@ Filters.register('distort-puppet-warp', {
         const srcCtx = origCanvas.getContext('2d')!;
         const srcData = srcCtx.getImageData(0, 0, fullW, fullH);
         const src8 = srcData.data;
-
-        const getPixelVal = (sx: number, sy: number, c: number) => {
-            let x = Math.floor(sx);
-            let y = Math.floor(sy);
-            if (x < 0) x = 0; else if (x >= fullW) x = fullW - 1;
-            if (y < 0) y = 0; else if (y >= fullH) y = fullH - 1;
-            return src8[(y * fullW + x) * 4 + c];
-        };
-
-        const sampleBilinear = (u: number, v: number, c: number) => {
-            const x0 = Math.floor(u);
-            const y0 = Math.floor(v);
-            const x1 = Math.min(fullW - 1, x0 + 1);
-            const y1 = Math.min(fullH - 1, y0 + 1);
-            const dx = u - x0;
-            const dy = v - y0;
-
-            const top = getPixelVal(x0, y0, c) * (1 - dx) + getPixelVal(x1, y0, c) * dx;
-            const bot = getPixelVal(x0, y1, c) * (1 - dx) + getPixelVal(x1, y1, c) * dx;
-            return top * (1 - dy) + bot * dy;
-        };
-
-        const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => {
-            return 0.5 * ((2 * p1) + (-p0 + p2) * t + 
-                (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + 
-                (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-        };
-
-        const sampleBicubic = (u: number, v: number, c: number) => {
-            const x0 = Math.floor(u);
-            const y0 = Math.floor(v);
-            const dx = u - x0;
-            const dy = v - y0;
-
-            const row = (offsetY: number) => {
-                return cubic(
-                    getPixelVal(x0 - 1, y0 + offsetY, c),
-                    getPixelVal(x0,     y0 + offsetY, c),
-                    getPixelVal(x0 + 1, y0 + offsetY, c),
-                    getPixelVal(x0 + 2, y0 + offsetY, c),
-                    dx
-                );
-            };
-
-            const val = cubic(row(-1), row(0), row(1), row(2), dy);
-            return Math.max(0, Math.min(255, val));
-        };
-
-        const l_sinc = (x: number) => {
-            if (x === 0) return 1;
-            const px = Math.PI * x;
-            return Math.sin(px) / px;
-        };
-
-        const l_weight = (x: number) => {
-            if (x < 0) x = -x;
-            if (x >= 3) return 0;
-            return l_sinc(x) * l_sinc(x / 3);
-        };
-
-        const sampleLanczos3 = (u: number, v: number, c: number) => {
-            const x0 = Math.floor(u);
-            const y0 = Math.floor(v);
-            let sum = 0, weightSum = 0;
-
-            for (let j = -2; j <= 3; j++) {
-                const sy = y0 + j;
-                const wy = l_weight(v - sy);
-                if (wy === 0) continue;
-
-                for (let i = -2; i <= 3; i++) {
-                    const sx = x0 + i;
-                    const wx = l_weight(u - sx);
-                    const w = wx * wy;
-                    if (w === 0) continue;
-
-                    sum += getPixelVal(sx, sy, c) * w;
-                    weightSum += w;
-                }
-            }
-
-            if (weightSum === 0) return getPixelVal(x0, y0, c);
-            const val = sum / weightSum;
-            return Math.max(0, Math.min(255, val));
-        };
 
         const buildMesh = () => {
             const cols = gridSize;
@@ -433,7 +349,7 @@ Filters.register('distort-puppet-warp', {
                     for (const [i0, i1, i2] of triangles) {
                         const p0 = vRest[i0], p1 = vRest[i1], p2 = vRest[i2];
                         const q0 = vDeformed[i0], q1 = vDeformed[i1], q2 = vDeformed[i2];
-                        drawTriangleHardware(bbCtx, origCanvas, p0, p1, p2, q0, q1, q2);
+                        Lib.mesh.drawTriangleHardware(bbCtx, origCanvas, p0, p1, p2, q0, q1, q2);
                     }
                 }
             } else {
@@ -446,19 +362,19 @@ Filters.register('distort-puppet-warp', {
 
                     let sampler: (u: number, v: number, c: number) => number;
                     if (interpolationMode === 'pixelated') {
-                        sampler = (u, v, c) => getPixelVal(Math.round(u), Math.round(v), c);
+                        sampler = (u, v, c) => Lib.image.sampleNearest(src8, fullW, fullH, u, v, c);
                     } else if (interpolationMode === 'low') {
-                        sampler = sampleBilinear;
+                        sampler = (u, v, c) => Lib.image.sampleBilinear(src8, fullW, fullH, u, v, c);
                     } else if (interpolationMode === 'lanczos') {
-                        sampler = sampleLanczos3;
+                        sampler = (u, v, c) => Lib.image.sampleLanczos3(src8, fullW, fullH, u, v, c);
                     } else {
-                        sampler = sampleBicubic;
+                        sampler = (u, v, c) => Lib.image.sampleBicubic(src8, fullW, fullH, u, v, c);
                     }
 
                     for (const [i0, i1, i2] of triangles) {
                         const p0 = vRest[i0], p1 = vRest[i1], p2 = vRest[i2];
                         const q0 = vDeformed[i0], q1 = vDeformed[i1], q2 = vDeformed[i2];
-                        drawTriangleSoftware(dst8, p0, p1, p2, q0, q1, q2, sampler);
+                        Lib.mesh.drawTriangleSoftware(dst8, fullW, fullH, p0, p1, p2, q0, q1, q2, sampler);
                     }
                     bbCtx.putImageData(dstImageData, 0, 0);
                 }
@@ -603,106 +519,6 @@ Filters.register('distort-puppet-warp', {
                     return { x: rx, y: ry };
                 }
             }
-        };
-
-        const drawTriangleSoftware = (
-            dstData: Uint8ClampedArray,
-            p0: { x: number; y: number },
-            p1: { x: number; y: number },
-            p2: { x: number; y: number },
-            q0: { x: number; y: number },
-            q1: { x: number; y: number },
-            q2: { x: number; y: number },
-            sampler: (u: number, v: number, c: number) => number
-        ) => {
-            const minX = Math.max(0, Math.floor(Math.min(q0.x, q1.x, q2.x)));
-            const maxX = Math.min(fullW - 1, Math.ceil(Math.max(q0.x, q1.x, q2.x)));
-            const minY = Math.max(0, Math.floor(Math.min(q0.y, q1.y, q2.y)));
-            const maxY = Math.min(fullH - 1, Math.ceil(Math.max(q0.y, q1.y, q2.y)));
-
-            const denom = (q1.y - q2.y) * (q0.x - q2.x) + (q2.x - q1.x) * (q0.y - q2.y);
-            if (Math.abs(denom) < 1e-6) return;
-
-            const invDenom = 1.0 / denom;
-
-            for (let y = minY; y <= maxY; y++) {
-                const rowOffset = y * fullW;
-                for (let x = minX; x <= maxX; x++) {
-                    const w0 = ((q1.y - q2.y) * (x - q2.x) + (q2.x - q1.x) * (y - q2.y)) * invDenom;
-                    const w1 = ((q2.y - q0.y) * (x - q2.x) + (q0.x - q2.x) * (y - q2.y)) * invDenom;
-                    const w2 = 1.0 - w0 - w1;
-
-                    const eps = -1e-4;
-                    if (w0 >= eps && w1 >= eps && w2 >= eps) {
-                        const u = w0 * p0.x + w1 * p1.x + w2 * p2.x;
-                        const v = w0 * p0.y + w1 * p1.y + w2 * p2.y;
-
-                        const idx = (rowOffset + x) * 4;
-                        dstData[idx]     = sampler(u, v, 0);
-                        dstData[idx + 1] = sampler(u, v, 1);
-                        dstData[idx + 2] = sampler(u, v, 2);
-                        dstData[idx + 3] = sampler(u, v, 3);
-                    }
-                }
-            }
-        };
-
-        const drawTriangleHardware = (
-            bCtx: CanvasRenderingContext2D,
-            img: HTMLCanvasElement,
-            p0: { x: number; y: number },
-            p1: { x: number; y: number },
-            p2: { x: number; y: number },
-            q0: { x: number; y: number },
-            q1: { x: number; y: number },
-            q2: { x: number; y: number }
-        ) => {
-            bCtx.save();
-            
-            // Explicitly reset hardware matrix before calculating relative mapping 
-            bCtx.setTransform(1, 0, 0, 1, 0, 0);
-
-            const cx = (q0.x + q1.x + q2.x) / 3;
-            const cy = (q0.y + q1.y + q2.y) / 3;
-            const expandX = (x: number) => x + (x - cx === 0 ? 0 : (x - cx > 0 ? 0.35 : -0.35));
-            const expandY = (y: number) => y + (y - cy === 0 ? 0 : (y - cy > 0 ? 0.35 : -0.35));
-
-            bCtx.beginPath();
-            bCtx.moveTo(expandX(q0.x), expandY(q0.y));
-            bCtx.lineTo(expandX(q1.x), expandY(q1.y));
-            bCtx.lineTo(expandX(q2.x), expandY(q2.y));
-            bCtx.closePath();
-            bCtx.clip();
-
-            const x0 = q0.x, y0 = q0.y;
-            const x1 = q1.x, y1 = q1.y;
-            const x2 = q2.x, y2 = q2.y;
-
-            const u0 = p0.x, v0 = p0.y;
-            const u1 = p1.x, v1 = p1.y;
-            const u2 = p2.x, v2 = p2.y;
-
-            const dX1 = x1 - x0, dY1 = y1 - y0;
-            const dX2 = x2 - x0, dY2 = y2 - y0;
-            const dU1 = u1 - u0, dV1 = v1 - v0;
-            const dU2 = u2 - u0, dV2 = v2 - v0;
-
-            const det = dU1 * dV2 - dU2 * dV1;
-            if (Math.abs(det) > 1e-6) {
-                const id = 1.0 / det;
-                const a = id * (dV2 * dX1 - dV1 * dX2);
-                const b = id * (dV2 * dY1 - dV1 * dY2);
-                const c = id * (dU1 * dX2 - dU2 * dX1);
-                const d = id * (dU1 * dY2 - dU2 * dY1);
-                const e = x0 - a * u0 - c * v0;
-                const f = y0 - b * u0 - d * v0;
-
-                // Explicitly set the precise calculated transform for this triangle
-                bCtx.setTransform(a, b, c, d, e, f);
-                bCtx.drawImage(img, 0, 0);
-            }
-
-            bCtx.restore();
         };
 
         const drawTriangleHeatmap = (
@@ -1056,7 +872,7 @@ Filters.register('distort-puppet-warp', {
             }
         };
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Puppet Warp Tools'));
+        ws.sidebar.appendChild(UI.createSubheading('Puppet Warp Tools'));
 
         ws.sidebar.appendChild(UI.createRadioGroup({
             label: 'Mode',
@@ -1073,7 +889,7 @@ Filters.register('distort-puppet-warp', {
         }));
 
         const stiffnessSection = UI.createNode('div', { style: 'display: none;' });
-        stiffnessSection.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Selected Pin Properties'));
+        stiffnessSection.appendChild(UI.createSubheading('Selected Pin Properties'));
 
         const stiffnessRow = UI.createSliderRow({
             label: 'Pin Influence', min: 0.2, max: 10.0, step: 0.1, value: 1.0,
@@ -1142,7 +958,7 @@ Filters.register('distort-puppet-warp', {
 
         ws.sidebar.appendChild(stiffnessSection);
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Deformation Model'));
+        ws.sidebar.appendChild(UI.createSubheading('Deformation Model'));
 
         ws.sidebar.appendChild(UI.createSelectRow({
             label: 'Algorithm',
@@ -1159,7 +975,7 @@ Filters.register('distort-puppet-warp', {
             }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Rigid Weights'));
+        ws.sidebar.appendChild(UI.createSubheading('Rigid Weights'));
 
         ws.sidebar.appendChild(UI.createSliderRow({
             label: 'Stiffness (α)', min: 0.5, max: 5.0, step: 0.1, value: alpha,
@@ -1232,7 +1048,7 @@ Filters.register('distort-puppet-warp', {
             }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Undo / Redo History'));
+        ws.sidebar.appendChild(UI.createSubheading('Undo / Redo History'));
 
         const historyRow = UI.createNode('div', { style: 'display: flex; gap: 8px; margin-bottom: 15px;' });
         const undoBtn = UI.createButton({
@@ -1251,7 +1067,7 @@ Filters.register('distort-puppet-warp', {
         historyRow.appendChild(redoBtn);
         ws.sidebar.appendChild(historyRow);
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Actions'));
+        ws.sidebar.appendChild(UI.createSubheading('Actions'));
 
         ws.sidebar.appendChild(UI.createButton({
             label: 'Freeze Subject Borders',

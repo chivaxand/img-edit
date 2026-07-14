@@ -51,6 +51,16 @@ export interface AppState {
         antsCtx: CanvasRenderingContext2D | null;
         showBorder: boolean;
     };
+    clipboard?: {
+        canvas: HTMLCanvasElement;
+        width: number;
+        height: number;
+        displayW: number;
+        displayH: number;
+        offsetX: number;
+        offsetY: number;
+        name: string;
+    } | null;
     customOverlay?: ((ctx: CanvasRenderingContext2D) => void) | null;
     [key: string]: any;
 }
@@ -95,6 +105,7 @@ export interface AppActions {
     handleFiles(files: FileList): void;
     download(): void;
     deselect(): void;
+    selectAll(): void;
     setZoom(level: string | number): void;
     stepZoom(dir: number): void;
     exportBase64(): void;
@@ -116,6 +127,9 @@ export interface AppActions {
     mergeAll(): void;
     duplicateLayer(): void;
     mergeLayerDown(): void;
+    copy(): void;
+    paste(e?: ClipboardEvent): Promise<void>;
+    closeImage(): void;
 }
 
 export const App = {
@@ -190,7 +204,26 @@ export const App = {
                 c.getContext('2d')!.drawImage(l.canvas, 0, 0);
                 return { ...l, canvas: c, ctx: c.getContext('2d')! };
             });
-            this.stack.push({ w: state.width, h: state.height, layers: copy });
+
+            // Clone selection mask if present
+            let maskCopy: HTMLCanvasElement | null = null;
+            if (state.selection.active && state.selection.mask) {
+                maskCopy = document.createElement('canvas');
+                maskCopy.width = state.selection.mask.width;
+                maskCopy.height = state.selection.mask.height;
+                maskCopy.getContext('2d')!.drawImage(state.selection.mask, 0, 0);
+            }
+
+            this.stack.push({
+                w: state.width,
+                h: state.height,
+                layers: copy,
+                selection: {
+                    active: state.selection.active,
+                    layerId: state.selection.layerId,
+                    mask: maskCopy
+                }
+            });
         },
         pop() { return this.stack.pop(); }
     },
@@ -271,7 +304,8 @@ export const App = {
         
         // Register Global Keybinds
         this.keybinds.register('ctrl+z', () => this.actions.undo());
-        this.keybinds.register('ctrl+a', () => this.actions.deselect());
+        this.keybinds.register('ctrl+a', () => this.actions.selectAll());
+        this.keybinds.register('ctrl+d', () => this.actions.deselect());
         this.keybinds.register('=, +', () => this.actions.stepZoom(1));
         this.keybinds.register('-', () => this.actions.stepZoom(-1));
         this.keybinds.register('0, *', () => this.actions.setZoom(1));
@@ -305,6 +339,20 @@ export const App = {
         document.body.addEventListener('dragover', e => e.preventDefault());
         document.body.addEventListener('drop', e => { e.preventDefault(); this.actions.handleFiles(e.dataTransfer!.files); });
         
+        // Global System Clipboard Events
+        document.addEventListener('copy', (e: ClipboardEvent) => {
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+            this.actions.copy();
+        });
+        document.addEventListener('paste', (e: ClipboardEvent) => {
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+            this.actions.paste(e);
+        });
+
         // Select default tool
         this.actions.setTool('move');
     },

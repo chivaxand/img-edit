@@ -86,7 +86,6 @@ export class Popup {
             .popup-wnd .ui-checkbox-label, .popup-wnd .ui-radio-label { font-size: 12px; margin: 6px 0; }
             .popup-wnd .ui-input, .popup-wnd .ui-select, .popup-wnd .ui-textarea { padding: 6px; border: 1px solid #3e3e42; }
             .popup-wnd button.btn { padding: 6px 15px; font-size: 12px; }
-            .popup-subtitle { font-size: 12px; font-weight: bold; color: #fff; text-transform: uppercase; margin: 15px 0 10px 0; letter-spacing: 0.5px; }
             .popup-separator { height: 1px; background: #3e3e42; margin: 10px 0; }
             .popup-hint { font-size: 11px; color: #999; margin-bottom: 10px; }
             .popup-preview { background: #1e1e1e; border: 1px solid #3e3e42; display: block; margin: 0 auto 10px; max-width: 100%; cursor: crosshair; }

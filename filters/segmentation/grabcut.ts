@@ -2,6 +2,7 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Filters, FilterContext } from '~/filters';
+import { Lib } from '~/libs/index';
 
 // --- Neural Network (MLP) for feature modeling ---
 class MiniMLP {
@@ -311,85 +312,6 @@ class Dinic {
     }
 }
 
-// --- Guided Filter for High-Resolution Upscaling ---
-function boxFilter(data: Float32Array, width: number, height: number, r: number): Float32Array {
-    const dest = new Float32Array(data.length);
-    const scale = 1 / ((2 * r + 1) * (2 * r + 1));
-    const temp = new Float32Array(data.length);
-    
-    // Horizontal pass
-    for (let y = 0; y < height; y++) {
-        let sum = 0;
-        const offset = y * width;
-        for (let x = -r; x <= r; x++) {
-            const px = Math.min(width - 1, Math.max(0, x));
-            sum += data[offset + px];
-        }
-        temp[offset] = sum;
-        for (let x = 1; x < width; x++) {
-            const nextX = Math.min(width - 1, x + r);
-            const prevX = Math.max(0, x - r - 1);
-            sum += data[offset + nextX] - data[offset + prevX];
-            temp[offset + x] = sum;
-        }
-    }
-    
-    // Vertical pass
-    for (let x = 0; x < width; x++) {
-        let sum = 0;
-        for (let y = -r; y <= r; y++) {
-            const py = Math.min(height - 1, Math.max(0, y));
-            sum += temp[py * width + x];
-        }
-        dest[x] = sum * scale;
-        for (let y = 1; y < height; y++) {
-            const nextY = Math.min(height - 1, y + r);
-            const prevY = Math.max(0, y - r - 1);
-            sum += temp[nextY * width + x] - temp[prevY * width + x];
-            dest[y * width + x] = sum * scale;
-        }
-    }
-    return dest;
-}
-
-function guidedFilterGrayscale(I: Float32Array, p: Float32Array, width: number, height: number, r: number, eps: number): Float32Array {
-    const meanI = boxFilter(I, width, height, r);
-    const meanP = boxFilter(p, width, height, r);
-    
-    const Ip = new Float32Array(I.length);
-    const II = new Float32Array(I.length);
-    for (let i = 0; i < I.length; i++) {
-        Ip[i] = I[i] * p[i];
-        II[i] = I[i] * I[i];
-    }
-    
-    const meanIp = boxFilter(Ip, width, height, r);
-    const meanII = boxFilter(II, width, height, r);
-    
-    const covIp = new Float32Array(I.length);
-    const varI = new Float32Array(I.length);
-    for (let i = 0; i < I.length; i++) {
-        covIp[i] = meanIp[i] - meanI[i] * meanP[i];
-        varI[i] = meanII[i] - meanI[i] * meanI[i];
-    }
-    
-    const a = new Float32Array(I.length);
-    const b = new Float32Array(I.length);
-    for (let i = 0; i < I.length; i++) {
-        a[i] = covIp[i] / (varI[i] + eps);
-        b[i] = meanP[i] - a[i] * meanI[i];
-    }
-    
-    const meanA = boxFilter(a, width, height, r);
-    const meanB = boxFilter(b, width, height, r);
-    
-    const q = new Float32Array(I.length);
-    for (let i = 0; i < I.length; i++) {
-        q[i] = meanA[i] * I[i] + meanB[i];
-    }
-    return q;
-}
-
 // --- GrabCut Interactive Filter Controller ---
 export const GrabCutFilter = {
     open() {
@@ -513,7 +435,7 @@ export const GrabCutFilter = {
         };
 
         // 2. Build Sidebar Controls
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Drawing Tools'));
+        ws.sidebar.appendChild(UI.createSubheading('Drawing Tools'));
 
         const fgBtn = UI.createNode('button', { className: 'fs-tool-btn fg-tool active' },
             UI.createNode('span', { style: 'display:inline-block; width:10px; height:10px; background-color:#4caf50; border-radius:50%' }),
@@ -560,13 +482,13 @@ export const GrabCutFilter = {
         const btnRow = UI.createNode('div', { style: 'display:flex; gap:10px;' }, undoBtn, clearBtn);
         ws.sidebar.appendChild(btnRow);
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:15px;' }, 'Viewport Controls'));
+        ws.sidebar.appendChild(UI.createSubheading('Viewport Controls'));
         const zoomInBtn = UI.createButton({ label: 'Zoom +', className: 'btn', onClick: () => { leftViewport.zoom = Math.min(25, leftViewport.zoom * 1.25); leftViewport.onDraw!(); } });
         const zoomOutBtn = UI.createButton({ label: 'Zoom -', className: 'btn', onClick: () => { leftViewport.zoom = Math.max(0.2, leftViewport.zoom / 1.25); leftViewport.onDraw!(); } });
         const resetZoomBtn = UI.createButton({ label: 'Reset Zoom', className: 'btn cancel-btn', onClick: () => { leftViewport.reset(); } });
         ws.sidebar.appendChild(UI.createNode('div', { style: 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;' }, zoomInBtn, zoomOutBtn, resetZoomBtn));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title', style: 'margin-top:15px;' }, 'Solver Settings'));
+        ws.sidebar.appendChild(UI.createSubheading('Solver Settings'));
 
         ws.sidebar.appendChild(UI.createSelectRow({
             label: 'View Mode',
@@ -724,7 +646,7 @@ export const GrabCutFilter = {
             const lowImgData = lowResCtx.getImageData(0, 0, lowW, lowH).data;
 
             // Convert to CIELAB for perceptually uniform feature mapping and edge detection
-            const labData = convertRgbToLab(lowImgData, lowW, lowH);
+            const labData = Lib.image.convertRgbToLab(lowImgData, lowW, lowH);
 
             // Downsample stroke mask pixels
             const lowMaskCanvas = document.createElement('canvas');
@@ -973,7 +895,7 @@ export const GrabCutFilter = {
 
             let finalBinaryMask: Uint8Array;
             if (edgeSoftness > 0) {
-                const filtered = guidedFilterGrayscale(grayGuidance, upscaledMask, fullW, fullH, edgeSoftness, 1e-3);
+                const filtered = Lib.image.guidedFilterGrayscale(grayGuidance, upscaledMask, fullW, fullH, edgeSoftness, 1e-3);
                 finalBinaryMask = new Uint8Array(fullW * fullH);
                 for (let i = 0; i < filtered.length; i++) {
                     finalBinaryMask[i] = filtered[i] >= maskThreshold ? 1 : 0;
@@ -1056,35 +978,6 @@ export const GrabCutFilter = {
 
 if (typeof window !== 'undefined') {
     (window as any).GrabCutFilter = GrabCutFilter;
-}
-
-// Standard sRGB-to-CIELAB conversion
-function rgbToLab(r: number, g: number, b: number): [number, number, number] {
-    let r_n = r / 255, g_n = g / 255, b_n = b / 255;
-    r_n = r_n > 0.04045 ? Math.pow((r_n + 0.055) / 1.055, 2.4) : r_n / 12.92;
-    g_n = g_n > 0.04045 ? Math.pow((g_n + 0.055) / 1.055, 2.4) : g_n / 12.92;
-    b_n = b_n > 0.04045 ? Math.pow((b_n + 0.055) / 1.055, 2.4) : b_n / 12.92;
-    const x = r_n * 0.4124564 + g_n * 0.3575761 + b_n * 0.1804375;
-    const y = r_n * 0.2126729 + g_n * 0.7151522 + b_n * 0.0721750;
-    const z = r_n * 0.0193339 + g_n * 0.1191920 + b_n * 0.9503041;
-    const xr = x / 0.95047, yr = y / 1.00000, zr = z / 1.08883;
-    const f = (t: number) => t > 0.008856 ? Math.pow(t, 1 / 3) : 7.787 * t + 16 / 116;
-    const fx = f(xr), fy = f(yr), fz = f(zr);
-    const L = fy > 0.008856 ? 116 * fy - 16 : 903.3 * yr;
-    const a = 500 * (fx - fy);
-    const b_val = 200 * (fy - fz);
-    return [L, a, b_val];
-}
-
-function convertRgbToLab(data: Uint8ClampedArray, w: number, h: number): Float32Array {
-    const size = w * h;
-    const lab = new Float32Array(size * 3);
-    for (let i = 0; i < size; i++) {
-        const idx = i * 4;
-        const [L, a, b] = rgbToLab(data[idx], data[idx + 1], data[idx + 2]);
-        lab[i * 3] = L; lab[i * 3 + 1] = a; lab[i * 3 + 2] = b;
-    }
-    return lab;
 }
 
 Filters.register('grabcut', {

@@ -20,6 +20,7 @@ export const Menu = {
             label: 'File',
             items: [
                 { label: 'Open...', action: () => document.getElementById('file-upload')!.click() },
+                { label: 'Close', action: () => App.actions.closeImage() },
                 { label: 'Export PNG', action: () => App.actions.download() },
                 { label: 'Export JPEG...', action: () => JpegExport.open() },
                 { label: 'Export SVG...', action: () => SvgExport.open() },
@@ -28,9 +29,18 @@ export const Menu = {
             ]
         },
         {
+            label: 'Edit',
+            items: [
+                { label: 'Undo (Ctrl+Z)', action: () => App.actions.undo() },
+                { label: 'Copy (Ctrl+C)', action: () => App.actions.copy() },
+                { label: 'Paste (Ctrl+V)', action: () => App.actions.paste() }
+            ]
+        },
+        {
             label: 'Select',
             items: [
-                { label: 'Deselect (Ctrl+A)', action: () => App.actions.deselect() },
+                { label: 'Select All (Ctrl+A)', action: () => App.actions.selectAll() },
+                { label: 'Deselect (Ctrl+D)', action: () => App.actions.deselect() },
                 { label: 'Inverse Selection', action: () => App.actions.inverseSelection() },
                 { label: 'Delete Selection (Del)', action: () => App.actions.deleteSelection() },
                 { label: 'Save Selection...', action: () => App.actions.openSaveSelectionDialog() },

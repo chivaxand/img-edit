@@ -1,14 +1,14 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { inpaintPatchBased, inpaintBiharmonic } from '~/filters/gen/inpaint';
+import { INPAINT_ALGORITHMS } from '~/filters/gen/inpaint/inpaint';
 import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
 
 App.registerTool({
     id: 'healing',
     icon: '🩹',
     title: 'Healing Brush',
-    settings: { mode: 'auto' as 'auto' | 'manual', algorithm: 'patch' as 'patch' | 'biharmonic', size: 30, hardness: 50, spacing: 10, alignment: 'none' },
+    settings: { mode: 'auto' as 'auto' | 'manual', algorithm: 'patch', algoSettings: {} as Record<string, any>, size: 30, hardness: 50, spacing: 10, alignment: 'none', softness: 0 },
 
     // State
     sourceAnchor: null as { x: number, y: number, layer: Layer } | null,
@@ -24,7 +24,21 @@ App.registerTool({
     autoMaskCtx: null as CanvasRenderingContext2D | null,
 
     onSelect(panel: HTMLElement) {
+        if (Object.keys(this.settings.algoSettings).length === 0) {
+            INPAINT_ALGORITHMS.forEach(algo => {
+                Object.assign(this.settings.algoSettings, algo.defaultSettings);
+            });
+        }
+
         panel.appendChild(UI.createHint('Choose Mode. Auto heals automatically. Alt+Click for Manual.'));
+
+        panel.appendChild(UI.createSliderRow({
+            label: 'Brush Size',
+            min: 5,
+            max: 100,
+            value: this.settings.size,
+            onInput: (v: string) => this.settings.size = parseInt(v)
+        }));
 
         // Mode Selection
         panel.appendChild(UI.createSelectRow({
@@ -44,14 +58,56 @@ App.registerTool({
             // Algorithm Selection
             panel.appendChild(UI.createSelectRow({
                 label: 'Algorithm',
-                value: this.settings.algorithm || 'patch',
-                options: [
-                    { value: 'patch', text: 'Patch-Based (Content-Aware)' },
-                    { value: 'biharmonic', text: 'Biharmonic Diffusion' }
-                ],
+                value: this.settings.algorithm,
+                options: INPAINT_ALGORITHMS.map(a => ({ value: a.id, text: a.name })),
                 onChange: (v: string) => {
-                    this.settings.algorithm = v as 'patch' | 'biharmonic';
+                    this.settings.algorithm = v;
+                    updateVisibility();
                 }
+            }));
+
+            const rows: { el: HTMLElement, algoId: string, condition?: (s: any) => boolean }[] = [];
+
+            INPAINT_ALGORITHMS.forEach(algo => {
+                algo.parameters.forEach(param => {
+                    let el: HTMLElement;
+                    if (param.type === 'slider') {
+                        el = UI.createSliderRow({
+                            label: param.label, min: param.min!, max: param.max!, step: param.step!, value: this.settings.algoSettings[param.id],
+                            onInput: (v: string) => { this.settings.algoSettings[param.id] = parseFloat(v); updateVisibility(); }
+                        });
+                    } else if (param.type === 'select') {
+                        el = UI.createSelectRow({
+                            label: param.label, options: param.options!, value: this.settings.algoSettings[param.id],
+                            onChange: (v: string) => { this.settings.algoSettings[param.id] = v; updateVisibility(); }
+                        });
+                    } else if (param.type === 'color') {
+                        el = UI.createColorRow({
+                            label: param.label, value: this.settings.algoSettings[param.id],
+                            onChange: (v: string) => { this.settings.algoSettings[param.id] = v; updateVisibility(); }
+                        });
+                    }
+                    panel.appendChild(el!);
+                    rows.push({ el: el!, algoId: algo.id, condition: param.condition });
+                });
+            });
+
+            const updateVisibility = () => {
+                rows.forEach(r => {
+                    const isVisible = r.algoId === this.settings.algorithm && (!r.condition || r.condition(this.settings.algoSettings));
+                    UI.toggle(r.el, isVisible);
+                });
+            };
+            updateVisibility();
+
+            // Edge Softness
+            panel.appendChild(UI.createSliderRow({
+                label: 'Edge Softness',
+                min: 0,
+                max: 50,
+                step: 1,
+                value: this.settings.softness,
+                onInput: (v: string) => this.settings.softness = parseInt(v)
             }));
 
             // Button to heal active selection if active
@@ -75,14 +131,6 @@ App.registerTool({
                 }
             });
             panel.appendChild(btnHealSel);
-
-            panel.appendChild(UI.createSliderRow({
-                label: 'Brush Size',
-                min: 5,
-                max: 100,
-                value: this.settings.size,
-                onInput: (v: string) => this.settings.size = parseInt(v)
-            }));
         } else {
             panel.appendChild(UI.createSliderRow({ label: 'Size', min: 5, max: 100, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));
             panel.appendChild(UI.createSliderRow({ label: 'Hardness', min: 0, max: 100, value: this.settings.hardness, onInput: (v: string) => this.settings.hardness = parseInt(v) }));
@@ -234,11 +282,8 @@ App.registerTool({
 
     healMask(layer: Layer, maskCanvas: HTMLCanvasElement) {
         App.actions.saveState();
-        if (this.settings.algorithm === 'biharmonic') {
-            inpaintBiharmonic(layer, maskCanvas, 'bicgstab', 300, 1.45);
-        } else {
-            inpaintPatchBased(layer, maskCanvas);
-        }
+        const algo = INPAINT_ALGORITHMS.find(a => a.id === this.settings.algorithm) || INPAINT_ALGORITHMS[0];
+        algo.apply(layer, maskCanvas, this.settings.algoSettings, this.settings.softness);
         App.emit('layer:content');
         App.emit('render');
     },

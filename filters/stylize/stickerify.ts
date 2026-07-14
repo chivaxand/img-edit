@@ -29,7 +29,7 @@ Filters.register('stickerify', {
 
         const update = () => hooks.preview(state);
 
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle', style: { marginTop: '10px' } }, 'Outline 1 (Inner)'));
+        container.appendChild(UI.createSubheading('Outline 1 (Inner)'));
 
         container.appendChild(UI.createSliderRow({
             label: 'Width (px)', min: 0, max: 64, step: 1, value: state.width1,
@@ -41,7 +41,7 @@ Filters.register('stickerify', {
             onChange: v => { state.color1 = v; update(); }
         }));
 
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle', style: { marginTop: '20px' } }, 'Outline 2 (Outer)'));
+        container.appendChild(UI.createSubheading('Outline 2 (Outer)'));
 
         container.appendChild(UI.createSliderRow({
             label: 'Width (px)', min: 0, max: 64, step: 1, value: state.width2,
@@ -53,14 +53,14 @@ Filters.register('stickerify', {
             onChange: v => { state.color2 = v; update(); }
         }));
 
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle', style: { marginTop: '20px' } }, 'Quality & Smoothing'));
+        container.appendChild(UI.createSubheading('Quality & Smoothing'));
 
         container.appendChild(UI.createSliderRow({
             label: 'Smoothing', min: 0, max: 10, step: 1, value: state.smoothing,
             onInput: v => { state.smoothing = parseInt(v); update(); }
         }));
 
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle', style: { marginTop: '20px' } }, 'Drop Shadow'));
+        container.appendChild(UI.createSubheading('Drop Shadow'));
 
         container.appendChild(UI.createCheckbox({label: 'Enable Shadow', value: state.shadowEnabled,
             onChange: v => {
@@ -93,8 +93,6 @@ Filters.register('stickerify', {
             label: 'Offset Y (px)', min: -50, max: 50, step: 1, value: state.shadowOffsetY,
             onInput: v => { state.shadowOffsetY = parseInt(v); update(); }
         }));
-
-        container.appendChild(UI.createNode('div', { style: { marginTop: '20px' } }));
 
         update();
     },

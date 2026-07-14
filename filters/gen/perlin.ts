@@ -78,7 +78,7 @@ Filters.register('perlin-noise', {
         }));
 
         // Blending Controls
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Blending'));
+        container.appendChild(UI.createSubheading('Blending'));
         container.appendChild(UI.createSelectRow({
             label: 'Mode', 
             options: [

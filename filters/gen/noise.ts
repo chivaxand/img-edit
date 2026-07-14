@@ -53,13 +53,13 @@ Filters.register('noise', {
         }));
 
         // --- Values ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Values'));
+        container.appendChild(UI.createSubheading('Values'));
         container.appendChild(UI.createSliderRow({ label: 'Min / C1', min: 0, max: 255, value: state.min, onInput: (v: any) => { state.min = parseInt(v); update(); } }));
         container.appendChild(UI.createSliderRow({ label: 'Max / C2', min: 0, max: 255, value: state.max, onInput: (v: any) => { state.max = parseInt(v); update(); } }));
         container.appendChild(rowSigma);
 
         // --- Blending Controls ---
-        container.appendChild(UI.createNode('div', { className: 'popup-subtitle' }, 'Blending'));
+        container.appendChild(UI.createSubheading('Blending'));
         container.appendChild(UI.createSelectRow({
             label: 'Mode', 
             options: [

@@ -1,6 +1,7 @@
 import { Filters, FilterContext } from '~/filters';
 import { UI } from '~/ui';
 import { App } from '~/app';
+import { Lib } from '~/libs/index';
 
 interface Point {
     x: number;
@@ -170,29 +171,6 @@ Filters.register('distort-cage-transform', {
             return p;
         };
 
-        const isPointInPolygon = (p: Point, polygon: Point[]): boolean => {
-            let inside = false;
-            const n = polygon.length;
-            let p1 = polygon[0];
-            for (let i = 0; i <= n; i++) {
-                const p2 = polygon[i % n];
-                if (p.y > Math.min(p1.y, p2.y)) {
-                    if (p.y <= Math.max(p1.y, p2.y)) {
-                        if (p.x <= Math.max(p1.x, p2.x)) {
-                            if (p1.y !== p2.y) {
-                                const xints = (p.y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y) + p1.x;
-                                if (p1.x === p2.x || p.x <= xints) {
-                                    inside = !inside;
-                                }
-                            }
-                        }
-                    }
-                }
-                p1 = p2;
-            }
-            return inside;
-        };
-
         const distToSegment = (px: number, py: number, x1: number, y1: number, x2: number, y2: number) => {
             const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
             if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), proj: { x: x1, y: y1 } };
@@ -209,91 +187,6 @@ Filters.register('distort-cage-transform', {
         const srcData = srcCtx.getImageData(0, 0, fullW, fullH);
         const src8 = srcData.data;
         let activeSrc8 = src8;
-
-        const getPixelVal = (sx: number, sy: number, c: number) => {
-            let x = Math.floor(sx);
-            let y = Math.floor(sy);
-            if (x < 0) x = 0; else if (x >= fullW) x = fullW - 1;
-            if (y < 0) y = 0; else if (y >= fullH) y = fullH - 1;
-            return activeSrc8[(y * fullW + x) * 4 + c];
-        };
-
-        const sampleBilinear = (u: number, v: number, c: number) => {
-            const x0 = Math.floor(u);
-            const y0 = Math.floor(v);
-            const x1 = Math.min(fullW - 1, x0 + 1);
-            const y1 = Math.min(fullH - 1, y0 + 1);
-            const dx = u - x0;
-            const dy = v - y0;
-
-            const top = getPixelVal(x0, y0, c) * (1 - dx) + getPixelVal(x1, y0, c) * dx;
-            const bot = getPixelVal(x0, y1, c) * (1 - dx) + getPixelVal(x1, y1, c) * dx;
-            return top * (1 - dy) + bot * dy;
-        };
-
-        const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => {
-            return 0.5 * ((2 * p1) + (-p0 + p2) * t + 
-                (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + 
-                (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-        };
-
-        const sampleBicubic = (u: number, v: number, c: number) => {
-            const x0 = Math.floor(u);
-            const y0 = Math.floor(v);
-            const dx = u - x0;
-            const dy = v - y0;
-
-            const row = (offsetY: number) => {
-                return cubic(
-                    getPixelVal(x0 - 1, y0 + offsetY, c),
-                    getPixelVal(x0,     y0 + offsetY, c),
-                    getPixelVal(x0 + 1, y0 + offsetY, c),
-                    getPixelVal(x0 + 2, y0 + offsetY, c),
-                    dx
-                );
-            };
-
-            const val = cubic(row(-1), row(0), row(1), row(2), dy);
-            return Math.max(0, Math.min(255, val));
-        };
-
-        const l_sinc = (x: number) => {
-            if (x === 0) return 1;
-            const px = Math.PI * x;
-            return Math.sin(px) / px;
-        };
-
-        const l_weight = (x: number) => {
-            if (x < 0) x = -x;
-            if (x >= 3) return 0;
-            return l_sinc(x) * l_sinc(x / 3);
-        };
-
-        const sampleLanczos3 = (u: number, v: number, c: number) => {
-            const x0 = Math.floor(u);
-            const y0 = Math.floor(v);
-            let sum = 0, weightSum = 0;
-
-            for (let j = -2; j <= 3; j++) {
-                const sy = y0 + j;
-                const wy = l_weight(v - sy);
-                if (wy === 0) continue;
-
-                for (let i = -2; i <= 3; i++) {
-                    const sx = x0 + i;
-                    const wx = l_weight(u - sx);
-                    const w = wx * wy;
-                    if (w === 0) continue;
-
-                    sum += getPixelVal(sx, sy, c) * w;
-                    weightSum += w;
-                }
-            }
-
-            if (weightSum === 0) return getPixelVal(x0, y0, c);
-            const val = sum / weightSum;
-            return Math.max(0, Math.min(255, val));
-        };
 
         // --- Grid Generation ---
 
@@ -363,7 +256,7 @@ Filters.register('distort-cage-transform', {
             gridCoords = [];
             for (let i = 0; i < vRest.length; i++) {
                 const pt = vRest[i];
-                const isInside = isPointInPolygon(pt, originalCage);
+                const isInside = Lib.mesh.isPointInPolygon(pt, originalCage);
 
                 const phi = new Float64Array(N);
                 const psi = new Float64Array(N);
@@ -498,87 +391,6 @@ Filters.register('distort-cage-transform', {
             }
         };
 
-        const drawTriangleSoftware = (
-            dstData: Uint8ClampedArray,
-            p0: Point, p1: Point, p2: Point,
-            q0: Point, q1: Point, q2: Point,
-            sampler: (u: number, v: number, c: number) => number
-        ) => {
-            const minX = Math.max(0, Math.floor(Math.min(q0.x, q1.x, q2.x)));
-            const maxX = Math.min(fullW - 1, Math.ceil(Math.max(q0.x, q1.x, q2.x)));
-            const minY = Math.max(0, Math.floor(Math.min(q0.y, q1.y, q2.y)));
-            const maxY = Math.min(fullH - 1, Math.ceil(Math.max(q0.y, q1.y, q2.y)));
-
-            const denom = (q1.y - q2.y) * (q0.x - q2.x) + (q2.x - q1.x) * (q0.y - q2.y);
-            if (Math.abs(denom) < 1e-6) return;
-
-            const invDenom = 1.0 / denom;
-
-            for (let y = minY; y <= maxY; y++) {
-                const rowOffset = y * fullW;
-                for (let x = minX; x <= maxX; x++) {
-                    const w0 = ((q1.y - q2.y) * (x - q2.x) + (q2.x - q1.x) * (y - q2.y)) * invDenom;
-                    const w1 = ((q2.y - q0.y) * (x - q2.x) + (q0.x - q2.x) * (y - q2.y)) * invDenom;
-                    const w2 = 1.0 - w0 - w1;
-
-                    const eps = -1e-4;
-                    if (w0 >= eps && w1 >= eps && w2 >= eps) {
-                        const u = w0 * p0.x + w1 * p1.x + w2 * p2.x;
-                        const v = w0 * p0.y + w1 * p1.y + w2 * p2.y;
-
-                        const idx = (rowOffset + x) * 4;
-                        dstData[idx]     = sampler(u, v, 0);
-                        dstData[idx + 1] = sampler(u, v, 1);
-                        dstData[idx + 2] = sampler(u, v, 2);
-                        dstData[idx + 3] = sampler(u, v, 3);
-                    }
-                }
-            }
-        };
-
-        const drawTriangleHardware = (
-            bCtx: CanvasRenderingContext2D,
-            img: HTMLCanvasElement,
-            p0: Point, p1: Point, p2: Point,
-            q0: Point, q1: Point, q2: Point
-        ) => {
-            bCtx.save();
-            bCtx.setTransform(1, 0, 0, 1, 0, 0);
-
-            const cx = (q0.x + q1.x + q2.x) / 3;
-            const cy = (q0.y + q1.y + q2.y) / 3;
-            // Anti-aliasing seam bleed patch
-            const expandX = (x: number) => x + (x - cx > 0 ? 0.45 : -0.45);
-            const expandY = (y: number) => y + (y - cy > 0 ? 0.45 : -0.45);
-
-            bCtx.beginPath();
-            bCtx.moveTo(expandX(q0.x), expandY(q0.y));
-            bCtx.lineTo(expandX(q1.x), expandY(q1.y));
-            bCtx.lineTo(expandX(q2.x), expandY(q2.y));
-            bCtx.closePath();
-            bCtx.clip();
-
-            const dX1 = q1.x - q0.x, dY1 = q1.y - q0.y;
-            const dX2 = q2.x - q0.x, dY2 = q2.y - q0.y;
-            const dU1 = p1.x - p0.x, dV1 = p1.y - p0.y;
-            const dU2 = p2.x - p0.x, dV2 = p2.y - p0.y;
-
-            const det = dU1 * dV2 - dU2 * dV1;
-            if (Math.abs(det) > 1e-6) {
-                const id = 1.0 / det;
-                const a = id * (dV2 * dX1 - dV1 * dX2);
-                const b = id * (dV2 * dY1 - dV1 * dY2);
-                const c = id * (dU1 * dX2 - dU2 * dX1);
-                const d = id * (dU1 * dY2 - dU2 * dY1);
-                const e = q0.x - a * p0.x - c * p0.y;
-                const f = q0.y - b * p0.x - d * p0.y;
-
-                bCtx.setTransform(a, b, c, d, e, f);
-                bCtx.drawImage(img, 0, 0);
-            }
-            bCtx.restore();
-        };
-
         const render = () => {
             if (mode === 'deform') {
                 const useFastDrag = draggingNodeIdx !== null || isAdjustingSlider;
@@ -615,7 +427,7 @@ Filters.register('distort-cage-transform', {
                     bbCtx.imageSmoothingQuality = 'low';
 
                     for (const [i0, i1, i2] of renderTriangles) {
-                        drawTriangleHardware(bbCtx, cutOutMode && maskedOrigCanvas ? maskedOrigCanvas : origCanvas, vRest[i0], vRest[i1], vRest[i2], vDeformed[i0], vDeformed[i1], vDeformed[i2]);
+                        Lib.mesh.drawTriangleHardware(bbCtx, cutOutMode && maskedOrigCanvas ? maskedOrigCanvas : origCanvas, vRest[i0], vRest[i1], vRest[i2], vDeformed[i0], vDeformed[i1], vDeformed[i2]);
                     }
                 } else {
                     const deformLayer = document.createElement('canvas');
@@ -627,17 +439,17 @@ Filters.register('distort-cage-transform', {
 
                     let sampler: (u: number, v: number, c: number) => number;
                     if (interpolationMode === 'pixelated') {
-                        sampler = (u, v, c) => getPixelVal(Math.round(u), Math.round(v), c);
+                        sampler = (u, v, c) => Lib.image.sampleNearest(activeSrc8, fullW, fullH, u, v, c);
                     } else if (interpolationMode === 'bilinear') {
-                        sampler = sampleBilinear;
+                        sampler = (u, v, c) => Lib.image.sampleBilinear(activeSrc8, fullW, fullH, u, v, c);
                     } else if (interpolationMode === 'lanczos') {
-                        sampler = sampleLanczos3;
+                        sampler = (u, v, c) => Lib.image.sampleLanczos3(activeSrc8, fullW, fullH, u, v, c);
                     } else {
-                        sampler = sampleBicubic;
+                        sampler = (u, v, c) => Lib.image.sampleBicubic(activeSrc8, fullW, fullH, u, v, c);
                     }
 
                     for (const [i0, i1, i2] of renderTriangles) {
-                        drawTriangleSoftware(dst8, vRest[i0], vRest[i1], vRest[i2], vDeformed[i0], vDeformed[i1], vDeformed[i2], sampler);
+                        Lib.mesh.drawTriangleSoftware(dst8, fullW, fullH, vRest[i0], vRest[i1], vRest[i2], vDeformed[i0], vDeformed[i1], vDeformed[i2], sampler);
                     }
                     deformCtx.putImageData(dstImageData, 0, 0);
                     
@@ -835,7 +647,7 @@ Filters.register('distort-cage-transform', {
 
         // --- Sidebar UI ---
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Interaction Mode'));
+        ws.sidebar.appendChild(UI.createSubheading('Interaction Mode'));
 
         const setMode = (newMode: 'edit' | 'deform') => {
             if (mode === newMode) return;
@@ -873,7 +685,7 @@ Filters.register('distort-cage-transform', {
             }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Display Settings'));
+        ws.sidebar.appendChild(UI.createSubheading('Display Settings'));
 
         ws.sidebar.appendChild(UI.createSliderRow({
             label: 'Mesh Density', min: 10, max: 100, step: 1, value: gridSize,
@@ -926,7 +738,7 @@ Filters.register('distort-cage-transform', {
             onChange: (v) => { showMesh = v; viewport.drawOverlay(); }
         }));
 
-        ws.sidebar.appendChild(UI.createNode('div', { className: 'fs-workspace-section-title' }, 'Actions'));
+        ws.sidebar.appendChild(UI.createSubheading('Actions'));
 
         ws.sidebar.appendChild(UI.createButton({
             label: 'Reset Deformation',

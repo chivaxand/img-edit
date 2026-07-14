@@ -27,10 +27,7 @@ const assertSameDims = (A: Matrix, B: Matrix) => {
     }
 };
 
-/**
- * Compressed Sparse Row (CSR) Matrix
- * Equivalent to scipy.sparse.csr_matrix
- */
+// Compressed Sparse Row (CSR) Matrix
 export class SparseMatrix {
     public rows: number;
     public cols: number;
@@ -574,6 +571,91 @@ export const linalg = {
         return x;
     },
 
+    /** LDLT decomposition with pivoting: P^T * A * P = L * D * L^T */
+    ldlt(A_in: Matrix): { L: Matrix; D: Vector; P: number[] } {
+        const n = A_in.length;
+        const A = A_in.map(row => [...row]);
+        const P = Array.from({ length: n }, (_, i) => i);
+        const L: Matrix = Array.from({ length: n }, (_, i) =>
+            Array.from({ length: n }, (_, j) => (i === j ? 1.0 : 0.0))
+        );
+        const D = new Array(n).fill(0);
+        for (let k = 0; k < n; k++) {
+            let pivot = k;
+            let maxVal = Math.abs(A[k][k]);
+            for (let i = k + 1; i < n; i++) {
+                if (Math.abs(A[i][i]) > maxVal) {
+                    maxVal = Math.abs(A[i][i]);
+                    pivot = i;
+                }
+            }
+            if (pivot !== k) {
+                const tempRow = A[k];
+                A[k] = A[pivot];
+                A[pivot] = tempRow;
+                for (let r = 0; r < n; r++) {
+                    const temp = A[r][k];
+                    A[r][k] = A[r][pivot];
+                    A[r][pivot] = temp;
+                }
+                const tempP = P[k];
+                P[k] = P[pivot];
+                P[pivot] = tempP;
+                for (let j = 0; j < k; j++) {
+                    const tempL = L[k][j];
+                    L[k][j] = L[pivot][j];
+                    L[pivot][j] = tempL;
+                }
+            }
+            let sumD = 0;
+            for (let j = 0; j < k; j++) sumD += L[k][j] ** 2 * D[j];
+            D[k] = A[k][k] - sumD;
+            if (Math.abs(D[k]) < 1e-15) {
+                D[k] = 0;
+                continue;
+            }
+            for (let i = k + 1; i < n; i++) {
+                let sumL = 0;
+                for (let j = 0; j < k; j++) sumL += L[i][j] * L[k][j] * D[j];
+                L[i][k] = (A[i][k] - sumL) / D[k];
+            }
+        }
+        return { L, D, P };
+    },
+
+    /** Solves A * x = b using LDLT decomposition with pivoting */
+    solveLDLT(A: Matrix, b: Vector): Vector {
+        const { L, D, P } = linalg.ldlt(A);
+        const n = L.length;
+        const b_perm = new Array(n);
+        for (let i = 0; i < n; i++) b_perm[i] = b[P[i]];
+        const y = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+            let sum = b_perm[i];
+            for (let j = 0; j < i; j++) sum -= L[i][j] * y[j];
+            y[i] = sum;
+        }
+        const z = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+            if (Math.abs(D[i]) < 1e-15) {
+                z[i] = 0;
+            } else {
+                z[i] = y[i] / D[i];
+            }
+        }
+        const x_perm = new Array(n).fill(0);
+        for (let i = n - 1; i >= 0; i--) {
+            let sum = z[i];
+            for (let j = i + 1; j < n; j++) sum -= L[j][i] * x_perm[j];
+            x_perm[i] = sum;
+        }
+        const x = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+            x[P[i]] = x_perm[i];
+        }
+        return x;
+    },
+
     /** Computes matrix norm (Frobenius 'fro' or Infinity 'inf') */
     norm(A: Matrix, type: 'fro' | 'inf' = 'fro'): number {
         if (type === 'fro') {
@@ -820,8 +902,10 @@ export const linalg = {
             A.push([-x, -y, -1, 0, 0, 0, x * u, y * u, u]);
             A.push([0, 0, 0, -x, -y, -1, x * v, y * v, v]);
         }
+        // Pad with a row of zeros to make it 9x9 so that the 9th column of V is computed.
+        A.push([0, 0, 0, 0, 0, 0, 0, 0, 0]);
         const { V } = linalg.svd(A);
-        const lastCol = V.length - 1;
+        const lastCol = V[0].length - 1;
         const H_flat = V.map(row => row[lastCol]);
         const scale = H_flat[8] !== 0 ? 1.0 / H_flat[8] : 1.0;
         return [
@@ -829,5 +913,17 @@ export const linalg = {
             [H_flat[3] * scale, H_flat[4] * scale, H_flat[5] * scale],
             [H_flat[6] * scale, H_flat[7] * scale, H_flat[8] * scale]
         ];
+    },
+
+    /** Computes Principal Component Analysis (PCA) for a set of data points (rows) */
+    pca(points: Matrix, k: number): { components: Matrix; explainedVariance: Vector; mean: Vector } {
+        const { cov, mean } = linalg.covariance(points);
+        const { values, vectors } = linalg.eigenSymmetric(cov);
+        const limit = Math.min(k, values.length);
+        const explainedVariance = values.slice(0, limit);
+        const components: Matrix = Array.from({ length: limit }, (_, colIdx) =>
+            vectors.map(row => row[colIdx])
+        );
+        return { components, explainedVariance, mean };
     }
 };

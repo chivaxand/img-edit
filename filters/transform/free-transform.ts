@@ -3,6 +3,7 @@ import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { Filters, FilterContext } from '~/filters';
 import { Lib } from '~/libs/index';
+import { linalg } from '~/libs/linalg';
 
 Filters.register('free-transform', {
     name: 'Free Transform',
@@ -55,10 +56,12 @@ Filters.register('free-transform', {
             { x: 0, y: origH }
         ];
 
-        const hCoeffs = getInverseHomography(srcCorners, corners);
+        const H = linalg.solveHomography(corners, srcCorners, { method: 'fast' });
 
-        if (hCoeffs) {
-            const [a, b, c, d, e, f, g, h] = hCoeffs;
+        if (H) {
+            const a = H[0][0], b = H[0][1], c = H[0][2];
+            const d = H[1][0], e = H[1][1], f = H[1][2];
+            const g = H[2][0], h = H[2][1];
 
             const srcCtx = origCanvas.getContext('2d')!;
             const srcData = srcCtx.getImageData(0, 0, origW, origH);
@@ -161,20 +164,10 @@ Filters.register('free-transform', {
             drawInteractive();
         };
 
-        const cornerControls = UI.createNode('div', {
-            style: {
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '8px',
-                width: '100%',
-                marginBottom: '15px'
-            }
-        });
-
         const labels = ['Top-Left', 'Top-Right', 'Bottom-Right', 'Bottom-Left'];
         const inputs: { x: HTMLInputElement; y: HTMLInputElement }[] = [];
 
-        labels.forEach((label, idx) => {
+        const cornerRows = labels.map((label, idx) => {
             const xInp = UI.createInput('number', { value: Math.round(p.corners[idx].x) }, (t: HTMLInputElement) => {
                 p.corners[idx].x = parseFloat(t.value) || 0;
                 update();
@@ -186,17 +179,48 @@ Filters.register('free-transform', {
 
             inputs.push({ x: xInp, y: yInp });
 
-            const row = UI.createNode('div', { style: 'display:flex; flex-direction:column; gap:4px;' },
+            return UI.createNode('div', { style: 'display:flex; flex-direction:column; gap:4px;' },
                 UI.createNode('label', { style: 'font-size:11px; color:#aaa; font-weight:bold;' }, label),
                 UI.createNode('div', { style: 'display:flex; gap:4px; align-items:center;' },
                     UI.createNode('span', { style: 'font-size:11px; color:#666;' }, 'X:'), xInp,
                     UI.createNode('span', { style: 'font-size:11px; color:#666;' }, 'Y:'), yInp
                 )
             );
-            cornerControls.appendChild(row);
         });
 
-        root.appendChild(cornerControls);
+        root.appendChild(UI.createGrid(2, cornerRows, { style: { marginBottom: '15px' } }));
+
+        let dragStartCorners: { x: number; y: number }[] | null = null;
+        const rotateRow = UI.createAngleRow({
+            label: 'Rotate', min: -180, max: 180, value: 0,
+            onInput: (v: number) => {
+                if (!dragStartCorners) {
+                    dragStartCorners = p.corners.map(c => ({ x: c.x, y: c.y }));
+                }
+                const cx = dragStartCorners.reduce((sum, pt) => sum + pt.x, 0) / 4;
+                const cy = dragStartCorners.reduce((sum, pt) => sum + pt.y, 0) / 4;
+                const rad = v * Math.PI / 180;
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+                p.corners.forEach((c, idx) => {
+                    const oc = dragStartCorners![idx];
+                    c.x = Math.round(cx + (oc.x - cx) * cos - (oc.y - cy) * sin);
+                    c.y = Math.round(cy + (oc.x - cx) * sin + (oc.y - cy) * cos);
+                    inputs[idx].x.value = c.x.toString();
+                    inputs[idx].y.value = c.y.toString();
+                });
+                update();
+            },
+            onChange: () => {
+                dragStartCorners = null;
+                const rotInp = rotateRow.querySelector('input') as HTMLInputElement;
+                if (rotInp) {
+                    rotInp.value = '0';
+                    rotInp.dispatchEvent(new Event('input'));
+                }
+            }
+        });
+        root.appendChild(rotateRow);
 
         root.appendChild(UI.createSelectRow({
             label: 'Interpolation',
@@ -432,10 +456,12 @@ Filters.register('free-transform', {
                 { x: 0, y: p.origH }
             ];
 
-            const hCoeffs = getInverseHomography(srcCorners, viewCorners);
+            const H = linalg.solveHomography(viewCorners, srcCorners, { method: 'fast' });
 
-            if (hCoeffs) {
-                const [a, b, c, d, e, f, g, h] = hCoeffs;
+            if (H) {
+                const a = H[0][0], b = H[0][1], c = H[0][2];
+                const d = H[1][0], e = H[1][1], f = H[1][2];
+                const g = H[2][0], h = H[2][1];
                 
                 const minX_v = Math.max(0, Math.floor(Math.min(...viewCorners.map(pt => pt.x))));
                 const maxX_v = Math.min(viewW - 1, Math.ceil(Math.max(...viewCorners.map(pt => pt.x))));
@@ -516,60 +542,6 @@ Filters.register('free-transform', {
     }
 });
 
-
-function solveLinearSystem(A: number[][], B: number[]): number[] | null {
-    const n = B.length;
-    for (let i = 0; i < n; i++) {
-        let maxRow = i;
-        for (let k = i + 1; k < n; k++) {
-            if (Math.abs(A[k][i]) > Math.abs(A[maxRow][i])) {
-                maxRow = k;
-            }
-        }
-        const tempRow = A[i]; A[i] = A[maxRow]; A[maxRow] = tempRow;
-        const tempB = B[i]; B[i] = B[maxRow]; B[maxRow] = tempB;
-
-        if (Math.abs(A[i][i]) < 1e-12) return null;
-
-        for (let k = i + 1; k < n; k++) {
-            const factor = A[k][i] / A[i][i];
-            for (let j = i; j < n; j++) {
-                A[k][j] -= factor * A[i][j];
-            }
-            B[k] -= factor * B[i];
-        }
-    }
-
-    const x = new Array(n).fill(0);
-    for (let i = n - 1; i >= 0; i--) {
-        let sum = B[i];
-        for (let j = i + 1; j < n; j++) {
-            sum -= A[i][j] * x[j];
-        }
-        x[i] = sum / A[i][i];
-    }
-    return x;
-}
-
-function getInverseHomography(src: {x:number, y:number}[], dst: {x:number, y:number}[]): number[] | null {
-    const A: number[][] = [];
-    const B: number[] = [];
-
-    for (let i = 0; i < 4; i++) {
-        const u = dst[i].x;
-        const v = dst[i].y;
-        const x = src[i].x;
-        const y = src[i].y;
-
-        A.push([u, v, 1, 0, 0, 0, -u * x, -v * x]);
-        B.push(x);
-
-        A.push([0, 0, 0, u, v, 1, -u * y, -v * y]);
-        B.push(y);
-    }
-
-    return solveLinearSystem(A, B);
-}
 
 function drawGridOverlay(ctx: CanvasRenderingContext2D, width: number, height: number, cols: number = 3, rows: number = 3) {
     ctx.save();

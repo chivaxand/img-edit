@@ -199,33 +199,17 @@ export const GifExport = {
 
                 validFrames.forEach(f => {
                     const l = f.layer;
-                    
-                    // 1. Calculate Intersection with Canvas
-                    const ix = Math.max(0, l.x);
-                    const iy = Math.max(0, l.y);
-                    const ir = Math.min(canvasW, l.x + l.width);
-                    const ib = Math.min(canvasH, l.y + l.height);
-                    
-                    const w = ir - ix;
-                    const h = ib - iy;
+                    const rect = Lib.canvas.getIntersection(l, canvasW, canvasH);
 
-                    // Only add if layer is visible on canvas
-                    if (w > 0 && h > 0) {
-                        // 2. Extract Cropped Data
-                        const sx = ix - l.x;
-                        const sy = iy - l.y;
-
-                        const tempCv = document.createElement('canvas');
-                        tempCv.width = w; 
-                        tempCv.height = h;
-                        const tempCtx = tempCv.getContext('2d')!;
-                        tempCtx.drawImage(l.canvas, sx, sy, w, h, 0, 0, w, h);
+                    if (rect.w > 0 && rect.h > 0) {
+                        const { canvas: tempCv, ctx: tempCtx } = Lib.canvas.create(rect.w, rect.h);
+                        tempCtx.drawImage(l.canvas, rect.sx, rect.sy, rect.w, rect.h, 0, 0, rect.w, rect.h);
 
                         const delayCS = Math.max(1, Math.round(f.delay / 10));
 
                         gif.addFrame(tempCv, {
-                            x: ix, 
-                            y: iy,
+                            x: rect.x, 
+                            y: rect.y,
                             delay: delayCS,
                             disposal: 2, 
                             transparent: 255

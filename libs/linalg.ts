@@ -891,19 +891,52 @@ export const linalg = {
         return sol;
     },
 
-    solveHomography(src: { x: number; y: number }[], dst: { x: number; y: number }[]): Matrix {
-        if (src.length !== 4 || dst.length !== 4) {
-            throw new Error("solveHomography requires exactly 4 source and 4 destination points.");
+    solveHomography(
+        src: { x: number; y: number }[],
+        dst: { x: number; y: number }[],
+        options: { method?: 'fast' | 'robust' } = {}
+    ): Matrix {
+        let method = options.method || (src.length === 4 ? 'fast' : 'robust');
+        if (method === 'fast') {
+            if (src.length !== 4 || dst.length !== 4) {
+                throw new Error("Fast homography requires exactly 4 points.");
+            }
+            const A: Matrix = [];
+            const B: Vector = [];
+            for (let i = 0; i < 4; i++) {
+                const { x, y } = src[i];
+                const { x: u, y: v } = dst[i];
+                A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]);
+                B.push(u);
+                A.push([0, 0, 0, x, y, 1, -x * v, -y * v]);
+                B.push(v);
+            }
+            try {
+                const h = linalg.solveLU(A, B);
+                for (let i = 0; i < 8; i++) {
+                    if (isNaN(h[i]) || !isFinite(h[i])) {
+                        throw new Error("Invalid results in fast homography.");
+                    }
+                }
+                return [
+                    [h[0], h[1], h[2]],
+                    [h[3], h[4], h[5]],
+                    [h[6], h[7], 1.0]
+                ];
+            } catch (err) {
+                method = 'robust';
+            }
         }
         const A: Matrix = [];
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < src.length; i++) {
             const { x, y } = src[i];
             const { x: u, y: v } = dst[i];
             A.push([-x, -y, -1, 0, 0, 0, x * u, y * u, u]);
             A.push([0, 0, 0, -x, -y, -1, x * v, y * v, v]);
         }
-        // Pad with a row of zeros to make it 9x9 so that the 9th column of V is computed.
-        A.push([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        if (src.length === 4) {
+            A.push([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        }
         const { V } = linalg.svd(A);
         const lastCol = V[0].length - 1;
         const H_flat = V.map(row => row[lastCol]);

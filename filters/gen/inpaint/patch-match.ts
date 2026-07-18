@@ -86,26 +86,49 @@ export namespace PatchMatch {
         const w = nnf.width;
         const h = nnf.height;
 
-        const validSourceCoords: { x: number, y: number }[] = [];
-        for (let y = 0; y < source.height; y++) {
-            for (let x = 0; x < source.width; x++) {
-                if (!source.isMasked(x, y)) {
-                    validSourceCoords.push({ x, y });
-                }
+        let validCount = 0;
+        const srcW = source.width;
+        const srcH = source.height;
+        const srcMask = source.mask;
+
+        for (let i = 0; i < srcMask.length; i++) {
+            if (srcMask[i] === 0) {
+                validCount++;
             }
         }
 
-        if (validSourceCoords.length === 0) {
-            validSourceCoords.push({ x: 0, y: 0 });
+        let validX: Int32Array;
+        let validY: Int32Array;
+
+        if (validCount === 0) {
+            validX = new Int32Array(1);
+            validY = new Int32Array(1);
+            validX[0] = 0;
+            validY[0] = 0;
+            validCount = 1;
+        } else {
+            validX = new Int32Array(validCount);
+            validY = new Int32Array(validCount);
+            let idx = 0;
+            for (let y = 0; y < srcH; y++) {
+                const rowOffset = y * srcW;
+                for (let x = 0; x < srcW; x++) {
+                    if (srcMask[rowOffset + x] === 0) {
+                        validX[idx] = x;
+                        validY[idx] = y;
+                        idx++;
+                    }
+                }
+            }
         }
 
         for (let y = 0; y < h; y++) {
             const rowOffset = y * w;
             for (let x = 0; x < w; x++) {
                 const idx = rowOffset + x;
-                const randCoord = validSourceCoords[Math.floor(Math.random() * validSourceCoords.length)];
-                nnf.fieldX[idx] = randCoord.x;
-                nnf.fieldY[idx] = randCoord.y;
+                const randIdx = Math.floor(Math.random() * validCount);
+                nnf.fieldX[idx] = validX[randIdx];
+                nnf.fieldY[idx] = validY[randIdx];
                 nnf.distance[idx] = 65535;
             }
         }
@@ -141,11 +164,14 @@ export namespace PatchMatch {
         target: PyImage,
         x: number, y: number,
         xp: number, yp: number,
-        R: number
+        R: number,
+        currentBest = 65535
     ): number {
         let distance = 0;
-        let wsum = 0;
         const ssdmax = 4 * 255 * 255;
+        const totalIterations = (2 * R + 1) * (2 * R + 1);
+        const wsum = totalIterations * ssdmax;
+        const threshold = (currentBest * wsum) / 65535;
 
         for (let dy = -R; dy <= R; dy++) {
             const ty = y + dy;
@@ -156,28 +182,28 @@ export namespace PatchMatch {
             const syOffset = sy * source.width;
 
             for (let dx = -R; dx <= R; dx++) {
-                wsum += ssdmax;
                 const tx = x + dx;
                 const sx = xp + dx;
                 if (targetOutOfBoundsY || tx < 0 || tx >= target.width) {
                     distance += ssdmax;
-                    continue;
-                }
-                if (sourceOutOfBoundsY || sx < 0 || sx >= source.width || source.mask[syOffset + sx] === 1) {
+                } else if (sourceOutOfBoundsY || sx < 0 || sx >= source.width || source.mask[syOffset + sx] === 1) {
                     distance += ssdmax;
-                    continue;
+                } else {
+                    const tIdx = (tyOffset + tx) * 4;
+                    const sIdx = (syOffset + sx) * 4;
+                    const dr = target.pixels[tIdx] - source.pixels[sIdx];
+                    const dg = target.pixels[tIdx + 1] - source.pixels[sIdx + 1];
+                    const db = target.pixels[tIdx + 2] - source.pixels[sIdx + 2];
+                    const da = target.pixels[tIdx + 3] - source.pixels[sIdx + 3];
+                    distance += dr * dr + dg * dg + db * db + da * da;
                 }
-                const tIdx = (tyOffset + tx) * 4;
-                const sIdx = (syOffset + sx) * 4;
-                const dr = target.pixels[tIdx] - source.pixels[sIdx];
-                const dg = target.pixels[tIdx + 1] - source.pixels[sIdx + 1];
-                const db = target.pixels[tIdx + 2] - source.pixels[sIdx + 2];
-                const da = target.pixels[tIdx + 3] - source.pixels[sIdx + 3];
-                distance += dr * dr + dg * dg + db * db + da * da;
+
+                if (distance >= threshold) {
+                    return 65535;
+                }
             }
         }
 
-        if (wsum === 0) return 0;
         return Math.floor(65535 * (distance / wsum));
     }
 
@@ -205,8 +231,10 @@ export namespace PatchMatch {
         const h = nnf.height;
         const evaluate = (x: number, y: number, candX: number, candY: number, idx: number) => {
             if (candX < 0 || candX >= source.width || candY < 0 || candY >= source.height) return;
+            // Skip center pixels that are masked in source
+            if (source.mask[candY * source.width + candX] === 1) return;
 
-            const d = patchDistance(nnf, source, target, x, y, candX, candY, R);
+            const d = patchDistance(nnf, source, target, x, y, candX, candY, R, nnf.distance[idx]);
             if (d < nnf.distance[idx]) {
                 nnf.fieldX[idx] = candX;
                 nnf.fieldY[idx] = candY;
@@ -237,8 +265,8 @@ export namespace PatchMatch {
                         const bestY = nnf.fieldY[idx];
 
                         while (searchWidth > 0) {
-                            const rx = bestX + Math.round((Math.random() - 0.5) * 2 * searchWidth);
-                            const ry = bestY + Math.round((Math.random() - 0.5) * 2 * searchWidth);
+                            const rx = bestX + Math.floor(Math.random() * (2 * searchWidth + 1)) - searchWidth;
+                            const ry = bestY + Math.floor(Math.random() * (2 * searchWidth + 1)) - searchWidth;
                             const cx = Math.max(0, Math.min(source.width - 1, rx));
                             const cy = Math.max(0, Math.min(source.height - 1, ry));
 
@@ -266,8 +294,8 @@ export namespace PatchMatch {
                         const bestY = nnf.fieldY[idx];
 
                         while (searchWidth > 0) {
-                            const rx = bestX + Math.round((Math.random() - 0.5) * 2 * searchWidth);
-                            const ry = bestY + Math.round((Math.random() - 0.5) * 2 * searchWidth);
+                            const rx = bestX + Math.floor(Math.random() * (2 * searchWidth + 1)) - searchWidth;
+                            const ry = bestY + Math.floor(Math.random() * (2 * searchWidth + 1)) - searchWidth;
                             const cx = Math.max(0, Math.min(source.width - 1, rx));
                             const cy = Math.max(0, Math.min(source.height - 1, ry));
 
@@ -325,7 +353,8 @@ export namespace PatchMatch {
                         const nnfIdx = ypt * W_nnf + xpt;
                         const xst = nnf.fieldX[nnfIdx];
                         const yst = nnf.fieldY[nnfIdx];
-                        const w = similarity[nnf.distance[nnfIdx]];
+                        const dist = nnf.distance[nnfIdx];
+                        const w = similarity[dist >= 0 && dist < 65536 ? dist : 65535];
                         const xs = xst - dx;
                         const ys = yst - dy;
 
@@ -504,6 +533,31 @@ export namespace PatchMatch {
                             nextPixels[nIdx * 4 + 1] = gSum / count;
                             nextPixels[nIdx * 4 + 2] = bSum / count;
                             nextPixels[nIdx * 4 + 3] = aSum / count;
+                        } else {
+                            // Average masked pixels if no unmasked sub-pixels exist
+                            let rSumAll = 0, gSumAll = 0, bSumAll = 0, aSumAll = 0;
+                            let countAll = 0;
+                            for (let dy = 0; dy < 2; dy++) {
+                                const py = ny * 2 + dy;
+                                if (py >= curH) continue;
+                                for (let dx = 0; dx < 2; dx++) {
+                                    const px = nx * 2 + dx;
+                                    if (px >= curW) continue;
+                                    const pIdx = py * curW + px;
+                                    const pIdx4 = pIdx * 4;
+                                    rSumAll += curPixels[pIdx4];
+                                    gSumAll += curPixels[pIdx4 + 1];
+                                    bSumAll += curPixels[pIdx4 + 2];
+                                    aSumAll += curPixels[pIdx4 + 3];
+                                    countAll++;
+                                }
+                            }
+                            if (countAll > 0) {
+                                nextPixels[nIdx * 4] = rSumAll / countAll;
+                                nextPixels[nIdx * 4 + 1] = gSumAll / countAll;
+                                nextPixels[nIdx * 4 + 2] = bSumAll / countAll;
+                                nextPixels[nIdx * 4 + 3] = aSumAll / countAll;
+                            }
                         }
                     } else {
                         nextMask[nIdx] = 0;
@@ -596,6 +650,9 @@ export namespace PatchMatch {
             const iterNNF = Math.min(5, 1 + level);
 
             for (let em = 0; em < iterEM; em++) {
+                if (em > 0) {
+                    computeNNFDistances(nnf, sourceLevel, currentTarget, radius);
+                }
                 for (let y = 0; y < currentTarget.height; y++) {
                     const rowOffset = y * currentTarget.width;
                     for (let x = 0; x < currentTarget.width; x++) {

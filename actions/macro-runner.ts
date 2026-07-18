@@ -4,6 +4,7 @@ import { Filters } from '~/filters';
 import { JpegExport } from './jpeg-export';
 import { GifExport } from './gif-export';
 import { SvgExport } from './svg-export';
+import { Lib } from '~/libs/index';
 
 export interface IScriptAPI {
     resizeCanvas(w: number, h: number): void;
@@ -281,60 +282,30 @@ export const ScriptAPI: IScriptAPI = {
         if (!l) return;
         const lineTool = App.tools.find(t => t.id === 'line');
         if (lineTool && lineTool.drawLineWithCaps) {
-            const sel = App.state.selection;
-            const hasSel = sel.active && sel.mask && sel.layerId === l.id;
-            let ctx = l.ctx;
-            let scratch: HTMLCanvasElement | null = null;
-            if (hasSel) {
-                scratch = document.createElement('canvas');
-                scratch.width = l.canvas.width;
-                scratch.height = l.canvas.height;
-                ctx = scratch.getContext('2d')!;
-            }
-            lineTool.drawLineWithCaps(ctx, sx, sy, ex, ey, strokeWidth, startCap, endCap, colorHex);
-            if (hasSel) {
-                ctx.globalCompositeOperation = 'destination-in';
-                ctx.drawImage(sel.mask!, 0, 0);
-                l.ctx.globalCompositeOperation = 'source-over';
-                l.ctx.drawImage(scratch!, 0, 0);
-            }
+            Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
+                lineTool.drawLineWithCaps(ctx, sx, sy, ex, ey, strokeWidth, startCap, endCap, colorHex);
+            });
         }
     },
 
     drawShape(type: 'rect' | 'circle', sx: number, sy: number, ex: number, ey: number, strokeWidth: number, fill: boolean, useStroke: boolean, radius: number) {
         const l = App.utils.getActive();
         if (!l) return;
-        const sel = App.state.selection;
-        const hasSel = sel.active && sel.mask && sel.layerId === l.id;
-        let ctx = l.ctx;
-        let scratch: HTMLCanvasElement | null = null;
-        if (hasSel) {
-            scratch = document.createElement('canvas');
-            scratch.width = l.canvas.width;
-            scratch.height = l.canvas.height;
-            ctx = scratch.getContext('2d')!;
-        }
-        ctx.save();
-        ctx.strokeStyle = App.state.fg;
-        ctx.fillStyle = App.state.bg;
-        ctx.lineWidth = strokeWidth;
-        ctx.beginPath();
-        const w = ex - sx, h = ey - sy;
-        if (type === 'rect') {
-            if (ctx.roundRect) ctx.roundRect(sx, sy, w, h, radius);
-            else ctx.rect(sx, sy, w, h);
-        } else {
-            ctx.ellipse(sx + w/2, sy + h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
-        }
-        if (fill) ctx.fill();
-        if (useStroke) ctx.stroke();
-        ctx.restore();
-        if (hasSel) {
-            ctx.globalCompositeOperation = 'destination-in';
-            ctx.drawImage(sel.mask!, 0, 0);
-            l.ctx.globalCompositeOperation = 'source-over';
-            l.ctx.drawImage(scratch!, 0, 0);
-        }
+        Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
+            ctx.strokeStyle = App.state.fg;
+            ctx.fillStyle = App.state.bg;
+            ctx.lineWidth = strokeWidth;
+            ctx.beginPath();
+            const w = ex - sx, h = ey - sy;
+            if (type === 'rect') {
+                if (ctx.roundRect) ctx.roundRect(sx, sy, w, h, radius);
+                else ctx.rect(sx, sy, w, h);
+            } else {
+                ctx.ellipse(sx + w/2, sy + h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
+            }
+            if (fill) ctx.fill();
+            if (useStroke) ctx.stroke();
+        });
     },
 
     exportPNG() {

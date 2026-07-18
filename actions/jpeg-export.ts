@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layers } from '~/layers';
+import { Lib } from '~/libs/index';
 
 export const JpegExport = {
     settings: {
@@ -55,28 +56,10 @@ export const JpegExport = {
         const canvasW = App.state.width;
         const canvasH = App.state.height;
 
-        const tempCv = document.createElement('canvas');
-        tempCv.width = canvasW;
-        tempCv.height = canvasH;
-        const tempCtx = tempCv.getContext('2d')!;
-
-        // Replace transparency with the selected background color
-        tempCtx.fillStyle = this.settings.bgColor;
-        tempCtx.fillRect(0, 0, canvasW, canvasH);
-
-        // Render layers visually from bottom to top
-        for (let i = App.state.layers.length - 1; i >= 0; i--) {
-            const l = App.state.layers[i];
-            if (l.visible) {
-                tempCtx.save();
-                tempCtx.globalAlpha = l.opacity;
-                tempCtx.globalCompositeOperation = (l.blend || 'source-over') as GlobalCompositeOperation;
-                
-                Layers.render(tempCtx, l);
-                
-                tempCtx.restore();
-            }
-        }
+        const tempCv = Lib.canvas.renderMerged(App.state.layers, canvasW, canvasH, {
+            bgColor: this.settings.bgColor,
+            forExport: true
+        });
 
         // Dynamically resolve filename from loaded state parameters
         let baseName = 'export';

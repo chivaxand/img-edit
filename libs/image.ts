@@ -63,6 +63,35 @@ export const image = {
         return gray;
     },
 
+    // Calculates a histogram for an array of values with specified bins and range.
+    histogram(data: Float32Array | Uint8ClampedArray | Uint8Array | number[], options: { bins?: number; range?: [number, number] } = {}): Uint32Array {
+        const bins = options.bins ?? 256;
+        const range = options.range ?? [0, 255];
+        const [min, max] = range;
+        const hist = new Uint32Array(bins);
+        const len = data.length;
+        const span = max - min;
+        if (span <= 0) {
+            if (len > 0) {
+                const val = data[0];
+                if (val >= min && val <= max) {
+                    hist[0] = len;
+                }
+            }
+            return hist;
+        }
+        for (let i = 0; i < len; i++) {
+            const v = data[i];
+            if (v >= min && v <= max) {
+                let binIdx = Math.floor(((v - min) / span) * bins);
+                if (binIdx >= bins) binIdx = bins - 1;
+                if (binIdx < 0) binIdx = 0;
+                hist[binIdx]++;
+            }
+        }
+        return hist;
+    },
+
     // Extracts a single channel from RGBA data into a Float32Array (0-255).
     extractChannel(rgbaData: Uint8ClampedArray | Uint8Array, w: number, h: number, channel: number): Float32Array {
         const out = new Float32Array(w * h);

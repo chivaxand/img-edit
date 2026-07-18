@@ -8,7 +8,7 @@ App.registerTool({
     id: 'healing',
     icon: '🩹',
     title: 'Healing Brush',
-    settings: { mode: 'auto' as 'auto' | 'manual', algorithm: 'patch', algoSettings: {} as Record<string, any>, size: 30, hardness: 50, spacing: 10, alignment: 'none', softness: 0 },
+    settings: { mode: 'auto' as 'auto' | 'manual', algorithm: 'patch_match', algoSettings: {} as Record<string, any>, size: 30, hardness: 50, spacing: 10, alignment: 'none', softness: 0 },
 
     // State
     sourceAnchor: null as { x: number, y: number, layer: Layer } | null,

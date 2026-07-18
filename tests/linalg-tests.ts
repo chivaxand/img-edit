@@ -493,14 +493,20 @@ export function runLinalgTests(runner: { test: (name: string, fn: () => any) => 
             { x: 3, y: 3 },
             { x: 1, y: 3 }
         ];
-        const H = solveHomography(src, dst);
-        const H_flat = flatten(H);
+        const H_default = solveHomography(src, dst);
+        const H_robust = solveHomography(src, dst, { method: 'robust' });
+        const H_fast = solveHomography(src, dst, { method: 'fast' });
+
         const expected = [
             2, 0, 1,
             0, 2, 1,
             0, 0, 1
         ];
-        return { pass: isClose(H_flat, expected, 1e-4), details: { actual: H_flat, expected } };
+        const defaultOk = isClose(flatten(H_default), expected, 1e-4);
+        const robustOk = isClose(flatten(H_robust), expected, 1e-4);
+        const fastOk = isClose(flatten(H_fast), expected, 1e-4);
+
+        return { pass: defaultOk && robustOk && fastOk, details: { H_default, H_robust, H_fast } };
     });
 
     test("Homography Matrix: Non-Affine Projective Transform", () => {
@@ -516,14 +522,20 @@ export function runLinalgTests(runner: { test: (name: string, fn: () => any) => 
             { x: 2, y: 1.5 },
             { x: 0, y: 2 }
         ];
-        const H = solveHomography(src, dst);
-        const H_flat = flatten(H);
+        const H_default = solveHomography(src, dst);
+        const H_robust = solveHomography(src, dst, { method: 'robust' });
+        const H_fast = solveHomography(src, dst, { method: 'fast' });
+
         const expected = [
             4, 0, 0,
             1, 2, 0,
             1, 0, 1
         ];
-        return { pass: isClose(H_flat, expected, 1e-4), details: { actual: H_flat, expected } };
+        const defaultOk = isClose(flatten(H_default), expected, 1e-4);
+        const robustOk = isClose(flatten(H_robust), expected, 1e-4);
+        const fastOk = isClose(flatten(H_fast), expected, 1e-4);
+
+        return { pass: defaultOk && robustOk && fastOk, details: { H_default, H_robust, H_fast } };
     });
     console.groupEnd();
 

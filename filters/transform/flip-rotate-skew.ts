@@ -215,7 +215,7 @@ Filters.register('skew-rotate', {
             p.w = parseFloat(t.value) || 0;
             if (p.scaleLock) { 
                 p.h = Math.round(p.w * (p.origH / p.origW)); 
-                (hInp as HTMLInputElement).value = p.h.toString(); 
+                hInp.value = p.h.toString(); 
             }
             update();
         });
@@ -224,20 +224,24 @@ Filters.register('skew-rotate', {
             p.h = parseFloat(t.value) || 0;
             if (p.scaleLock) { 
                 p.w = Math.round(p.h * (p.origW / p.origH)); 
-                (wInp as HTMLInputElement).value = p.w.toString(); 
+                wInp.value = p.w.toString(); 
             }
             update();
         });
         
-        const linkCheck = UI.createInput('checkbox', { checked: true }, (t: HTMLInputElement) => { p.scaleLock = t.checked; update(); });
+        const linkCheck = UI.createCheckbox({
+            label: 'Link', value: p.scaleLock,
+            onChange: (v: boolean) => { p.scaleLock = v; update(); }
+        });
 
-        const sizeControls = UI.createNode('div', { style: { display: 'flex', gap: '5px', alignItems: 'center' } },
-            wInp, UI.createNode('span', {}, 'x'), hInp,
-            UI.createNode('label', { style: { margin: '0 0 0 5px', display: 'flex', alignItems: 'center' } }, linkCheck, 'Link')
-        );
-        root.appendChild(UI.createRow('Size', sizeControls));
+        root.appendChild(UI.createRow('Size', UI.createStack('horizontal', [
+            wInp, UI.createNode('span', { style: 'margin: 0 4px;' }, 'x'), hInp, linkCheck
+        ], { style: { gap: '5px', marginBottom: '0' } })));
 
-        const rotRow = UI.createSliderRow({ label: 'Rotate (°)', min: -180, max: 180, value: 0, onInput: (v: string) => { p.rotate = parseFloat(v); update(); } });
+        const rotRow = UI.createAngleRow({
+            label: 'Rotate (°)', min: -180, max: 180, value: 0,
+            onInput: (v: number) => { p.rotate = v; update(); }
+        });
         const rotInp = rotRow.querySelector('input') as HTMLInputElement;
         root.appendChild(rotRow);
 
@@ -630,10 +634,10 @@ Filters.register('flip-rotate', {
 
         const update = () => hooks.preview(state);
 
-        const chkRow = UI.createNode('div', {style:'display:flex; gap:15px; margin-bottom:10px'});
-        chkRow.appendChild(UI.createCheckbox({ label: 'Flip Horizontal (X)', value: state.flipX, onChange: (v: boolean) => { state.flipX = v; update(); } }));
-        chkRow.appendChild(UI.createCheckbox({ label: 'Flip Vertical (Y)', value: state.flipY, onChange: (v: boolean) => { state.flipY = v; update(); } }));
-        root.appendChild(chkRow);
+        root.appendChild(UI.createStack('horizontal', [
+            UI.createCheckbox({ label: 'Flip Horizontal (X)', value: state.flipX, onChange: (v: boolean) => { state.flipX = v; update(); } }),
+            UI.createCheckbox({ label: 'Flip Vertical (Y)', value: state.flipY, onChange: (v: boolean) => { state.flipY = v; update(); } })
+        ], { style: { gap: '15px', marginBottom: '10px' } }));
 
         root.appendChild(UI.createSelectRow({
             label: 'Rotate',

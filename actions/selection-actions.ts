@@ -1,5 +1,7 @@
 import { App, AppActions } from '~/app';
 import { UI } from '~/ui';
+import { Lib } from '~/libs/index';
+import { Layer } from '~/layers';
 
 export const selectionActions: Pick<AppActions,
     'deselect' | 'selectAll' | 'deleteSelection' | 'inverseSelection' | 'updateSelectionOutline' |
@@ -25,10 +27,9 @@ export const selectionActions: Pick<AppActions,
 
         if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
             App.state.selection.layerId = l.id;
-            App.state.selection.mask = document.createElement('canvas');
-            App.state.selection.mask.width = l.canvas.width;
-            App.state.selection.mask.height = l.canvas.height;
-            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
+            const { canvas: mask, ctx: mCtx } = Lib.canvas.create(l.canvas.width, l.canvas.height);
+            App.state.selection.mask = mask;
+            App.state.selection.ctx = mCtx;
             App.state.selection.outline = null;
         }
 
@@ -122,10 +123,7 @@ export const selectionActions: Pick<AppActions,
         if (!l) return;
         const w = sel.mask.width;
         const h = sel.mask.height;
-        const outlineCanvas = document.createElement('canvas');
-        outlineCanvas.width = w;
-        outlineCanvas.height = h;
-        const oCtx = outlineCanvas.getContext('2d')!;
+        const { canvas: outlineCanvas, ctx: oCtx } = Lib.canvas.create(w, h);
         const maskCtx = sel.mask.getContext('2d')!;
         const imgData = maskCtx.getImageData(0, 0, w, h);
         const src = imgData.data;
@@ -169,10 +167,7 @@ export const selectionActions: Pick<AppActions,
             const l = activeLayer || selLayer;
             if (!l) return;
             App.actions.saveState();
-            const c = document.createElement('canvas');
-            c.width = l.canvas.width;
-            c.height = l.canvas.height;
-            const ctx = c.getContext('2d')!;
+            const { canvas: c, ctx } = Lib.canvas.create(l.canvas.width, l.canvas.height);
             ctx.drawImage(l.canvas, 0, 0);
             ctx.globalCompositeOperation = inverse ? 'destination-out' : 'destination-in';
             
@@ -189,10 +184,7 @@ export const selectionActions: Pick<AppActions,
             }
         } else {
             App.actions.saveState();
-            const c = document.createElement('canvas');
-            c.width = sel.mask.width;
-            c.height = sel.mask.height;
-            const cCtx = c.getContext('2d')!;
+            const { canvas: c, ctx: cCtx } = Lib.canvas.create(sel.mask.width, sel.mask.height);
             const maskCtx = sel.mask.getContext('2d')!;
             const maskData = maskCtx.getImageData(0, 0, sel.mask.width, sel.mask.height).data;
             const outImgData = cCtx.createImageData(sel.mask.width, sel.mask.height);
@@ -220,16 +212,13 @@ export const selectionActions: Pick<AppActions,
         App.ui.refreshLayers();
     },
 
-    loadSelection(layerIndex: number = 0, mode: 'auto' | 'alpha' | 'grayscale' = 'auto', inverse: boolean = false) {
+    loadSelection(layerIndex: number = 0, mode: 'auto' | 'alpha' | 'grayscale' = 'auto', inverse: boolean = false, targetLayer?: Layer) {
         const layer = App.state.layers[layerIndex];
         if (!layer) return;
 
         App.actions.saveState();
 
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = layer.canvas.width;
-        maskCanvas.height = layer.canvas.height;
-        const mCtx = maskCanvas.getContext('2d')!;
+        const { canvas: maskCanvas, ctx: mCtx } = Lib.canvas.create(layer.canvas.width, layer.canvas.height);
         const imgData = layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
         const data = imgData.data;
         const maskData = mCtx.createImageData(layer.canvas.width, layer.canvas.height);
@@ -269,10 +258,28 @@ export const selectionActions: Pick<AppActions,
         }
 
         mCtx.putImageData(maskData, 0, 0);
+
+        let finalMask = maskCanvas;
+        let finalCtx = mCtx;
+        let selectionLayerId = layer.id;
+
+        // Map the source mask to target layer space taking relative shift and size into account
+        if (targetLayer && targetLayer.id !== layer.id) {
+            const { canvas: targetMaskCanvas, ctx: targetMCtx } = Lib.canvas.create(targetLayer.canvas.width, targetLayer.canvas.height);
+            const destX = (layer.x - targetLayer.x) * (targetLayer.canvas.width / targetLayer.width);
+            const destY = (layer.y - targetLayer.y) * (targetLayer.canvas.height / targetLayer.height);
+            const destW = layer.width * (targetLayer.canvas.width / targetLayer.width);
+            const destH = layer.height * (targetLayer.canvas.height / targetLayer.height);
+            targetMCtx.drawImage(maskCanvas, destX, destY, destW, destH);
+            finalMask = targetMaskCanvas;
+            finalCtx = targetMCtx;
+            selectionLayerId = targetLayer.id;
+        }
+
         App.state.selection.active = true;
-        App.state.selection.mask = maskCanvas;
-        App.state.selection.ctx = mCtx;
-        App.state.selection.layerId = layer.id;
+        App.state.selection.mask = finalMask;
+        App.state.selection.ctx = finalCtx;
+        App.state.selection.layerId = selectionLayerId;
         App.state.selection.outline = null;
         App.actions.updateSelectionOutline();
         App.recordAction(`api.loadSelection(${layerIndex}, '${mode}', ${inverse});`);

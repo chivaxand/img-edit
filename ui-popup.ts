@@ -81,7 +81,6 @@ export class Popup {
             .popup-header { height: 32px; background: #333; cursor: move; flex-shrink: 0; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid #3e3e42; font-weight: 600; color: #fff; user-select: none; }
             .popup-body { padding: 15px; overflow-y: auto; flex: 1; min-height: 0; }
             .popup-wnd h3 { margin: 0 0 15px 0; font-size: 14px; color: #fff; font-weight: 600; border-bottom: 1px solid #3e3e42; padding-bottom: 8px; }
-            .popup-wnd .ui-row { margin-bottom: 12px; gap: 10px; }
             .popup-wnd .ui-row > label { min-width: 85px; font-size: 12px; }
             .popup-wnd .ui-checkbox-label, .popup-wnd .ui-radio-label { font-size: 12px; margin: 6px 0; }
             .popup-wnd .ui-input, .popup-wnd .ui-select, .popup-wnd .ui-textarea { padding: 6px; border: 1px solid #3e3e42; }

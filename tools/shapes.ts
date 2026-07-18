@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
+import { Lib } from '~/libs/index';
 
 // Shape Tools: Line
 App.registerTool({
@@ -67,30 +68,9 @@ App.registerTool({
         const sx = App.utils.toLocal(l, App.state.start.x, 'x'), sy = App.utils.toLocal(l, App.state.start.y, 'y');
         const ex = App.utils.toLocal(l, pos.x, 'x'), ey = App.utils.toLocal(l, pos.y, 'y');
 
-        const sel = App.state.selection;
-        const hasSel = sel.active && sel.mask && sel.layerId === l.id;
-
-        let ctx = l.ctx;
-        let scratch: HTMLCanvasElement | null = null;
-
-        if (hasSel) {
-            scratch = document.createElement('canvas');
-            scratch.width = l.canvas.width;
-            scratch.height = l.canvas.height;
-            ctx = scratch.getContext('2d')!;
-        }
-
-        this.drawLineWithCaps(ctx, sx, sy, ex, ey, this.settings.stroke, this.settings.startCap, this.settings.endCap, App.state.fg);
-
-        if (hasSel) {
-            ctx.globalCompositeOperation = 'destination-in';
-            ctx.drawImage(sel.mask!, 0, 0);
-
-            l.ctx.globalCompositeOperation = 'source-over';
-            l.ctx.drawImage(scratch!, 0, 0);
-        } else {
-            l.ctx.globalCompositeOperation = 'source-over';
-        }
+        Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
+            this.drawLineWithCaps(ctx, sx, sy, ex, ey, this.settings.stroke, this.settings.startCap, this.settings.endCap, App.state.fg);
+        });
 
         App.recordAction(`api.drawLine(${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, '${this.settings.startCap}', '${this.settings.endCap}', '${App.state.fg}');`);
         App.render();
@@ -252,49 +232,23 @@ App.registerTool({
             const sx = App.utils.toLocal(l, App.state.start.x, 'x'), sy = App.utils.toLocal(l, App.state.start.y, 'y');
             const ex = App.utils.toLocal(l, pos.x, 'x'), ey = App.utils.toLocal(l, pos.y, 'y');
             
-            // Check for active selection on this layer
-            const sel = App.state.selection;
-            const hasSel = sel.active && sel.mask && sel.layerId === l.id;
+            Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
+                App.utils.prepCtx(ctx, this.settings);
+                ctx.strokeStyle = App.state.fg;
+                ctx.fillStyle = App.state.bg;
+                ctx.lineWidth = this.settings.stroke;
 
-            // Determine target context (Layer or Scratch)
-            let ctx = l.ctx;
-            let scratch: HTMLCanvasElement | null = null;
-
-            if (hasSel) {
-                scratch = document.createElement('canvas');
-                scratch.width = l.canvas.width;
-                scratch.height = l.canvas.height;
-                ctx = scratch.getContext('2d')!;
-            }
-
-            ctx.save();
-            App.utils.prepCtx(ctx, this.settings);
-            ctx.strokeStyle = App.state.fg;
-            ctx.fillStyle = App.state.bg;
-            ctx.lineWidth = this.settings.stroke;
-
-            ctx.beginPath();
-            const w = ex-sx, h = ey-sy;
-            if(tool.id === 'rect') {
-                if(ctx.roundRect) ctx.roundRect(sx, sy, w, h, this.settings.radius);
-                else ctx.rect(sx, sy, w, h);
-            } else {
-                ctx.ellipse(sx+w/2, sy+h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
-            }
-            if(this.settings.fill) ctx.fill();
-            if(this.settings.useStroke) ctx.stroke();
-            ctx.restore();
-
-            if (hasSel) {
-                // Mask the scratch canvas and draw to layer
-                ctx.globalCompositeOperation = 'destination-in';
-                ctx.drawImage(sel.mask!, 0, 0);
-                
-                l.ctx.globalCompositeOperation = 'source-over';
-                l.ctx.drawImage(scratch!, 0, 0);
-            } else {
-                l.ctx.globalCompositeOperation = 'source-over';
-            }
+                ctx.beginPath();
+                const w = ex-sx, h = ey-sy;
+                if(tool.id === 'rect') {
+                    if(ctx.roundRect) ctx.roundRect(sx, sy, w, h, this.settings.radius);
+                    else ctx.rect(sx, sy, w, h);
+                } else {
+                    ctx.ellipse(sx+w/2, sy+h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
+                }
+                if(this.settings.fill) ctx.fill();
+                if(this.settings.useStroke) ctx.stroke();
+            });
             
             App.recordAction(`api.drawShape('${tool.id}', ${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, ${this.settings.fill}, ${this.settings.useStroke}, ${this.settings.radius});`);
             App.render();

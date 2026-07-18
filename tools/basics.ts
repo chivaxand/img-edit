@@ -96,7 +96,7 @@ App.registerTool({
     icon: '✥',
     title: 'Move',
     onSelect: (panel: HTMLElement) => {
-        panel.appendChild(UI.createHint('Click and drag to move layer. Hold Shift to move selection.'));
+        panel.appendChild(UI.createHint('Click and drag to move layer. Hold Ctrl to move selection.'));
     },
     onMouseDown: (e: MouseEvent) => {
         const l = App.utils.getActive();
@@ -104,7 +104,7 @@ App.registerTool({
         App.actions.saveState();
         App.state.isDrawing = true;
         const pos = App.utils.getPos(e);
-        App.state.movingSelection = e.shiftKey && App.state.selection.active && App.state.selection.mask !== null;
+        App.state.movingSelection = (e.ctrlKey || e.metaKey) && App.state.selection.active && App.state.selection.mask !== null;
         if (App.state.movingSelection) {
             App.state.lastMovePos = { x: pos.x, y: pos.y };
         } else {

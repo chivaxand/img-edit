@@ -1,5 +1,6 @@
 import { App, AppActions } from '~/app';
 import { Layers, Layer } from '~/layers';
+import { Lib } from '~/libs/index';
 
 export const layersActions: Pick<AppActions,
     'createLayer' | 'addEmptyLayer' | 'addLayer' | 'addTextLayer' |
@@ -132,18 +133,7 @@ export const layersActions: Pick<AppActions,
 
     mergeAll() {
         App.actions.saveState();
-        const c = document.createElement('canvas');
-        c.width = App.state.width; c.height = App.state.height;
-        const ctx = c.getContext('2d')!;
-        for (let i = App.state.layers.length - 1; i >= 0; i--) {
-            const l = App.state.layers[i];
-            if (!l.visible) continue;
-            ctx.save();
-            ctx.globalAlpha = l.opacity;
-            ctx.globalCompositeOperation = l.blend as GlobalCompositeOperation;
-            ctx.drawImage(l.canvas, l.x, l.y, l.width, l.height);
-            ctx.restore();
-        }
+        const c = Lib.canvas.renderMerged(App.state.layers, App.state.width, App.state.height);
         const newLayer = App.actions.createLayer('Merged', c);
         if (newLayer) {
             App.state.layers = [newLayer];
@@ -157,12 +147,8 @@ export const layersActions: Pick<AppActions,
         if (!l) return;
         App.actions.saveState();
 
-        // Deep copy canvas
-        const nc = document.createElement('canvas');
-        nc.width = l.canvas.width; nc.height = l.canvas.height;
-        nc.getContext('2d')!.drawImage(l.canvas, 0, 0);
+        const nc = Lib.canvas.clone(l.canvas);
 
-        // Create object copy
         const newL = { 
             ...l, 
             id: Date.now() + Math.random(), 

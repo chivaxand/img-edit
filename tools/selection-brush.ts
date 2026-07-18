@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
+import { Lib } from '~/libs/index';
 import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
 
 App.registerTool({
@@ -77,10 +78,9 @@ App.registerTool({
         // Initialize selection mask if not present
         if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
             App.state.selection.layerId = l.id;
-            App.state.selection.mask = document.createElement('canvas');
-            App.state.selection.mask.width = l.canvas.width;
-            App.state.selection.mask.height = l.canvas.height;
-            App.state.selection.ctx = App.state.selection.mask.getContext('2d');
+            const { canvas: mask, ctx: mCtx } = Lib.canvas.create(l.canvas.width, l.canvas.height);
+            App.state.selection.mask = mask;
+            App.state.selection.ctx = mCtx;
             App.state.selection.outline = null;
         }
 

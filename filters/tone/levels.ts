@@ -17,23 +17,12 @@ Filters.register('levels', {
         const w = layer.canvas.width, h = layer.canvas.height;
         const srcData = layer.ctx.getImageData(0, 0, w, h).data;
         
-        const histR = new Uint32Array(256);
-        const histG = new Uint32Array(256);
-        const histB = new Uint32Array(256);
-        const histA = new Uint32Array(256);
+        const histR = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 0), { bins: 256, range: [0, 255] });
+        const histG = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 1), { bins: 256, range: [0, 255] });
+        const histB = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 2), { bins: 256, range: [0, 255] });
+        const histA = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 3), { bins: 256, range: [0, 255] });
         let maxCount = 0;
         let maxCountAlpha = 0;
-
-        for (let i = 0; i < srcData.length; i += 4) {
-            const r = srcData[i];
-            const g = srcData[i + 1];
-            const b = srcData[i + 2];
-            const a = srcData[i + 3];
-            histR[r]++;
-            histG[g]++;
-            histB[b]++;
-            histA[a]++;
-        }
 
         // Find global max for scaling
         for (let i = 0; i < 256; i++) {
@@ -44,11 +33,11 @@ Filters.register('levels', {
         // State: Store per-channel settings
         const state: Record<string, any> = {
             channel: 'rgb',
-            rgb: { min: 0, max: 255 },
-            r: { min: 0, max: 255 },
-            g: { min: 0, max: 255 },
-            b: { min: 0, max: 255 },
-            a: { min: 0, max: 255 }
+            rgb: { min: 0, max: 255, outMin: 0, outMax: 255 },
+            r: { min: 0, max: 255, outMin: 0, outMax: 255 },
+            g: { min: 0, max: 255, outMin: 0, outMax: 255 },
+            b: { min: 0, max: 255, outMin: 0, outMax: 255 },
+            a: { min: 0, max: 255, outMin: 0, outMax: 255 }
         };
 
         // Draw Graph
@@ -130,65 +119,90 @@ Filters.register('levels', {
             value: state.channel,
             onChange: v => {
                 state.channel = v;
-                // Update sliders to match current channel values
-                (minSlider.input as HTMLInputElement).value = String(state[v].min);
-                (maxSlider.input as HTMLInputElement).value = String(state[v].max);
-                // Trigger event to update text display of sliders
-                minSlider.input.dispatchEvent(new Event('input')); 
-                maxSlider.input.dispatchEvent(new Event('input'));
+                rebuildSliders();
                 updateGraph();
             }
         }));
 
-        const onSliderChange = (key: string, val: string) => {
-            const v = parseInt(val);
-            const ch = state.channel;
-            
-            state[ch][key] = v;
+        const slidersContainer = UI.createNode('div');
+        container.appendChild(slidersContainer);
 
-            // If RGB (Master) is selected, sync R, G, B
-            if (ch === 'rgb') {
-                state.r[key] = v;
-                state.g[key] = v;
-                state.b[key] = v;
-            }
-            updatePreview();
+        const rebuildSliders = () => {
+            slidersContainer.innerHTML = '';
+            const ch = state.channel;
+            const cur = state[ch];
+
+            const inputSlider = UI.createMultiSlider({
+                label: 'Input Levels', min: 0, max: 255, step: 1,
+                handles: [
+                    { id: 'min', value: cur.min, color: '#000000', label: 'Black' },
+                    { id: 'max', value: cur.max, color: '#ffffff', label: 'White' }
+                ],
+                onInput: (values) => {
+                    cur.min = values.min as number;
+                    cur.max = values.max as number;
+                    if (ch === 'rgb') {
+                        state.r.min = cur.min; state.r.max = cur.max;
+                        state.g.min = cur.min; state.g.max = cur.max;
+                        state.b.min = cur.min; state.b.max = cur.max;
+                    }
+                    updatePreview();
+                }
+            });
+
+            const outputSlider = UI.createMultiSlider({
+                label: 'Output Levels', min: 0, max: 255, step: 1,
+                handles: [
+                    { id: 'outMin', value: cur.outMin, color: '#444444', label: 'Min' },
+                    { id: 'outMax', value: cur.outMax, color: '#dddddd', label: 'Max' }
+                ],
+                onInput: (values) => {
+                    cur.outMin = values.outMin as number;
+                    cur.outMax = values.outMax as number;
+                    if (ch === 'rgb') {
+                        state.r.outMin = cur.outMin; state.r.outMax = cur.outMax;
+                        state.g.outMin = cur.outMin; state.g.outMax = cur.outMax;
+                        state.b.outMin = cur.outMin; state.b.outMax = cur.outMax;
+                    }
+                    updatePreview();
+                }
+            });
+
+            slidersContainer.appendChild(inputSlider);
+            slidersContainer.appendChild(outputSlider);
         };
 
-        const minSlider = UI.createSlider({ 
-            min: 0, max: 255, value: state.rgb.min, 
-            onInput: v => onSliderChange('min', v) 
-        });
-        
-        const maxSlider = UI.createSlider({ 
-            min: 0, max: 255, value: state.rgb.max, 
-            onInput: v => onSliderChange('max', v) 
-        });
-
-        container.appendChild(UI.createRow('Black Point', minSlider.container));
-        container.appendChild(UI.createRow('White Point', maxSlider.container));
-        
+        rebuildSliders();
         updateGraph();
         hooks.preview(state);
     },
 
     process(data: Uint8ClampedArray, w: number, h: number, params: any) {
         // Generate LUTs for each channel
-        const createLut = (min: number, max: number) => {
+        const createLut = (min: number, max: number, outMin: number = 0, outMax: number = 255) => {
             const range = max - min;
-            const factor = 255 / (range === 0 ? 1 : range);
+            const factor = range === 0 ? 0 : 1 / range;
             const lut = new Uint8Array(256);
             for (let i = 0; i < 256; i++) {
-                lut[i] = Math.max(0, Math.min(255, (i - min) * factor));
+                const normalized = Math.max(0, Math.min(1, (i - min) * factor));
+                lut[i] = Math.max(0, Math.min(255, Math.round(outMin + normalized * (outMax - outMin))));
             }
             return lut;
         };
 
-        // If params comes from old history or simple call, default to safe values
-        const r = params.r || { min:0, max:255 };
-        const g = params.g || { min:0, max:255 };
-        const b = params.b || { min:0, max:255 };
-        const a = params.a || { min:0, max:255 };
+        const getChannelParams = (ch: any) => {
+            return {
+                min: ch?.min !== undefined ? ch.min : 0,
+                max: ch?.max !== undefined ? ch.max : 255,
+                outMin: ch?.outMin !== undefined ? ch.outMin : 0,
+                outMax: ch?.outMax !== undefined ? ch.outMax : 255
+            };
+        };
+
+        const r = getChannelParams(params.r);
+        const g = getChannelParams(params.g);
+        const b = getChannelParams(params.b);
+        const a = getChannelParams(params.a);
 
         // Handle legacy/simple params (if just min/max provided without channels)
         if (params.min !== undefined && params.r === undefined) {
@@ -196,10 +210,10 @@ Filters.register('levels', {
             r.max = g.max = b.max = params.max;
         }
 
-        const lutR = createLut(r.min, r.max);
-        const lutG = createLut(g.min, g.max);
-        const lutB = createLut(b.min, b.max);
-        const lutA = createLut(a.min, a.max);
+        const lutR = createLut(r.min, r.max, r.outMin, r.outMax);
+        const lutG = createLut(g.min, g.max, g.outMin, g.outMax);
+        const lutB = createLut(b.min, b.max, b.outMin, b.outMax);
+        const lutA = createLut(a.min, a.max, a.outMin, a.outMax);
 
         for (let i = 0; i < data.length; i += 4) {
             data[i]   = lutR[data[i]];

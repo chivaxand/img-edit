@@ -1,4 +1,5 @@
 import { plot, PaletteName } from '~/libs/plot';
+import { canvas as CanvasLib } from '~/libs/canvas';
 
 export interface UIProps {
     id?: string;
@@ -95,6 +96,28 @@ interface UIColorOpts {
     [k: string]: any;
 }
 
+export interface UIMultiSliderHandle {
+    id: string;
+    value: number | [number, number];
+    color?: string;
+    shape?: 'triangle' | 'left-half' | 'right-half';
+    label?: string;
+    splittable?: boolean;
+}
+
+export interface UIMultiSliderOpts {
+    label: string | null;
+    min: number;
+    max: number;
+    step?: number;
+    precision?: number;
+    handles: UIMultiSliderHandle[];
+    background?: string | string[];
+    onInput?: (values: Record<string, number | [number, number]>, handles: UIMultiSliderHandle[]) => void;
+    onChange?: (values: Record<string, number | [number, number]>, handles: UIMultiSliderHandle[]) => void;
+    [k: string]: any;
+}
+
 interface UIButtonOpts {
     label: string;
     onClick: (e: Event) => void;
@@ -118,6 +141,7 @@ interface UICanvasOpts {
 interface UILayoutOpts {
     style?: string | Partial<CSSStyleDeclaration>;
     className?: string;
+    hidden?: boolean;
 }
 
 interface UIInterface {
@@ -143,14 +167,14 @@ interface UIInterface {
     createPaletteSelectRow(opts: UIPaletteSelectOpts): HTMLElement;
     createRadioGroup<T = any>(opts: UIRadioOpts<T>): HTMLElement;
     createColorRow(opts: UIColorOpts): HTMLElement;
+    createMultiSlider(opts: UIMultiSliderOpts): HTMLElement;
     createCanvas(opts?: UICanvasOpts): { element: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null };
     toggle(element: HTMLElement, isVisible: boolean, displayMode?: string): void;
     createSection(title: string, ...children: any[]): HTMLElement;
-    createContainer(...children: any[]): HTMLElement;
     createSubheading(text: string, color?: string): HTMLElement;
     createExpandableSection(opts: { title: string; initiallyExpanded?: boolean; style?: string | Partial<CSSStyleDeclaration> }, ...children: any[]): HTMLElement;
     createGrid(cols: number, children: any[], opts?: UILayoutOpts): HTMLElement;
-    createFlexStack(orientation: 'horizontal' | 'vertical', children: any[], opts?: UILayoutOpts): HTMLElement;
+    createStack(orientation: 'horizontal' | 'vertical', children: any[], opts?: UILayoutOpts): HTMLElement;
     createSplitRow(leftContent: HTMLElement, rightContent: HTMLElement, opts?: UILayoutOpts): HTMLElement;
 }
 
@@ -360,7 +384,7 @@ export const UI: UIInterface = {
     createRadioGroup<T = any>({ label, options, value, name, layout = 'column', onChange }: UIRadioOpts<T>): HTMLElement {
         const uniqueName = name || ('radio_' + Math.random().toString(36).substr(2, 9));
         const groupContainer = UI.createNode('div', {
-            style: layout === 'row' ? 'display:flex; gap:10px; flex-wrap:wrap; flex:1;' : 'display:flex; flex-direction:column; gap:5px; flex:1;'
+            style: layout === 'row' ? 'display:flex; gap:10px; flex-wrap:wrap; flex:1;' : 'display:flex; flex-direction:column; gap:0px; flex:1;'
         });
         options.forEach((opt: any) => {
             const isObj = opt && typeof opt === 'object';
@@ -388,6 +412,247 @@ export const UI: UIInterface = {
             })
         );
         return this.createRow(label, box);
+    },
+
+    createMultiSlider(opts: UIMultiSliderOpts): HTMLElement {
+        const min = opts.min;
+        const max = opts.max;
+        const step = opts.step ?? 1;
+        const bg = opts.background ?? ['#000', '#fff'];
+        const getPrecision = (s: number) => {
+            if (Math.floor(s) === s) return 0;
+            const str = s.toString();
+            const dot = str.indexOf('.');
+            return dot === -1 ? 0 : str.length - dot - 1;
+        };
+        const precision = opts.precision !== undefined ? opts.precision : getPrecision(step);
+        const handles: UIMultiSliderHandle[] = [];
+        opts.handles.forEach(h => {
+            const isSplittable = h.splittable || Array.isArray(h.value);
+            if (isSplittable) {
+                if (Array.isArray(h.value)) {
+                    const valMin = h.value[0];
+                    const valMax = h.value[1];
+                    const leftHalf: UIMultiSliderHandle = { id: `${h.id}_left`, value: valMin, color: h.color, shape: 'left-half', label: h.label ? `${h.label} Min` : 'Min', splittable: true };
+                    const rightHalf: UIMultiSliderHandle = { id: `${h.id}_right`, value: valMax, color: h.color, shape: 'right-half', label: h.label ? `${h.label} Max` : 'Max', splittable: true };
+                    (leftHalf as any).originalId = h.id;
+                    (leftHalf as any).originalLabel = h.label;
+                    (leftHalf as any).originalSplittable = true;
+                    (rightHalf as any).originalId = h.id;
+                    (rightHalf as any).originalLabel = h.label;
+                    (rightHalf as any).originalSplittable = true;
+                    handles.push(leftHalf, rightHalf);
+                } else {
+                    const unified: UIMultiSliderHandle = { id: h.id, value: h.value as number, color: h.color, shape: 'triangle', label: h.label, splittable: true };
+                    (unified as any).originalId = h.id;
+                    (unified as any).originalLabel = h.label;
+                    (unified as any).originalSplittable = true;
+                    handles.push(unified);
+                }
+            } else {
+                const standard: UIMultiSliderHandle = { id: h.id, value: h.value as number, color: h.color, shape: h.shape || 'triangle', label: h.label, splittable: false };
+                (standard as any).originalId = h.id;
+                (standard as any).originalLabel = h.label;
+                (standard as any).originalSplittable = false;
+                handles.push(standard);
+            }
+        });
+        const getStructuredValues = () => {
+            const result: Record<string, number | [number, number]> = {};
+            opts.handles.forEach(origH => {
+                const id = origH.id;
+                const isSplittable = origH.splittable || Array.isArray(origH.value);
+                if (isSplittable) {
+                    const left = handles.find(h => (h as any).originalId === id && h.shape === 'left-half');
+                    const right = handles.find(h => (h as any).originalId === id && h.shape === 'right-half');
+                    if (left && right) {
+                        result[id] = [left.value as number, right.value as number];
+                    } else {
+                        const unified = handles.find(h => h.id === id || (h as any).originalId === id);
+                        const val = unified ? (unified.value as number) : (Array.isArray(origH.value) ? origH.value[0] : origH.value as number);
+                        result[id] = [val, val];
+                    }
+                } else {
+                    const h = handles.find(h => h.id === id);
+                    result[id] = h ? (h.value as number) : (origH.value as number);
+                }
+            });
+            return result;
+        };
+        const container = UI.createNode('div', { style: 'display: flex; flex-direction: column; width: 100%; gap: 0px; margin-bottom: 8px;' });
+        const trackWrapper = UI.createNode('div', { style: 'display: flex; align-items: center; gap: 5px; position: relative; width: 100%;' });
+        const canvasHeight = 26;
+        const cvs = UI.createNode('canvas', { style: 'cursor: pointer; display: block; width: 100%; height: 26px; border-radius: 2px;' }) as HTMLCanvasElement;
+        const ctx = cvs.getContext('2d')!;
+        const padding = 8;
+        let currentLayoutWidth = 240;
+        const valToX = (val: number) => {
+            const ratio = (val - min) / (max - min);
+            return padding + ratio * (currentLayoutWidth - 2 * padding);
+        };
+        const xToVal = (x: number) => {
+            const ratio = (x - padding) / (currentLayoutWidth - 2 * padding);
+            let val = min + ratio * (max - min);
+            val = Math.max(min, Math.min(max, val));
+            return parseFloat((Math.round(val / step) * step).toFixed(precision));
+        };
+        const checkAndMergeHandles = () => {
+            let mergedAny = false;
+            for (let i = 0; i < handles.length; i++) {
+                const h1 = handles[i];
+                if (h1.shape === 'left-half') {
+                    const origId = (h1 as any).originalId;
+                    if (!origId) continue;
+                    const rightIdx = handles.findIndex(h => h.shape === 'right-half' && (h as any).originalId === origId);
+                    if (rightIdx !== -1) {
+                        const h2 = handles[rightIdx];
+                        if (h1.value === h2.value) {
+                            const mergedHandle: UIMultiSliderHandle = { id: origId, value: h1.value, color: h1.color, shape: 'triangle', label: (h1 as any).originalLabel, splittable: (h1 as any).originalSplittable };
+                            (mergedHandle as any).originalId = origId;
+                            (mergedHandle as any).originalLabel = (h1 as any).originalLabel;
+                            (mergedHandle as any).originalSplittable = (h1 as any).originalSplittable;
+                            const idx1 = i;
+                            const idx2 = rightIdx;
+                            if (idx1 < idx2) {
+                                handles.splice(idx2, 1); handles.splice(idx1, 1, mergedHandle);
+                            } else {
+                                handles.splice(idx1, 1); handles.splice(idx2, 1, mergedHandle);
+                            }
+                            if (activeHandle?.id === h1.id || activeHandle?.id === h2.id) {
+                                activeHandle = mergedHandle;
+                            }
+                            mergedAny = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (mergedAny) {
+                rebuildInputs();
+                if (opts.onInput) opts.onInput(getStructuredValues(), handles);
+            }
+        };
+        const draw = () => {
+            ctx.clearRect(0, 0, currentLayoutWidth, canvasHeight);
+            CanvasLib.drawSliderTrack(ctx, padding, 2, currentLayoutWidth - 2 * padding, 10, bg);
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(padding, 2, currentLayoutWidth - 2 * padding, 10);
+            handles.forEach(h => {
+                const x = valToX(h.value as number);
+                const fillColor = h.color ?? '#ccc';
+                const strokeColor = activeHandle?.id === h.id ? '#0f0' : '#333';
+                CanvasLib.drawHandle(ctx, x, 12, 12, 12, h.shape || 'triangle', fillColor, strokeColor);
+            });
+        };
+        const inputsRow = UI.createNode('div', { style: 'display: flex; gap: 5px; width: 100%; flex-wrap: wrap;' });
+        const rebuildInputs = () => {
+            inputsRow.innerHTML = '';
+            handles.forEach(h => {
+                const colorMarker = UI.createNode('div', { style: `width: 8px; height: 8px; border-radius: 50%; background: ${h.color ?? '#ccc'}; margin-right: 4px; display: inline-block;` });
+                const wrapper = UI.createNode('div', { style: 'display: flex; align-items: center; background: #2d2d2d; padding: 2px 6px; border-radius: 3px; flex: 1; min-width: 70px;' });
+                const labelText = h.label ? `${h.label}: ` : '';
+                const labelSpan = labelText ? UI.createNode('span', { textContent: labelText, style: 'font-size: 10px; color: #888; margin-right: 4px; white-space: nowrap;' }) : null;
+                const numInput = UI.createInput('number', {
+                    value: (h.value as number).toFixed(precision),  min: min, max: max, step: step,
+                    style: 'background: transparent; border: none; color: #fff; width: 100%; font-size: 11px; outline: none; padding: 0;'
+                }, (target) => {
+                    let val = parseFloat(target.value);
+                    if (isNaN(val)) val = min;
+                    val = Math.max(min, Math.min(max, val));
+                    h.value = parseFloat(val.toFixed(precision));
+                    checkAndMergeHandles();
+                    draw();
+                    if (opts.onInput) opts.onInput(getStructuredValues(), handles);
+                });
+                (h as any).textInputElement = numInput;
+                wrapper.appendChild(colorMarker);
+                if (labelSpan) wrapper.appendChild(labelSpan);
+                wrapper.appendChild(numInput);
+                inputsRow.appendChild(wrapper);
+            });
+        };
+        let activeHandle: UIMultiSliderHandle | null = null;
+        let isDragging = false;
+        const handleMouseDown = (e: MouseEvent) => {
+            const rect = cvs.getBoundingClientRect();
+            const clickX = ((e.clientX - rect.left) / rect.width) * currentLayoutWidth;
+            let closest: UIMultiSliderHandle | null = null;
+            let minDist = Infinity;
+            for (const h of handles) {
+                const hX = valToX(h.value as number);
+                const dist = Math.abs(clickX - hX);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = h;
+                }
+            }
+            if (e.altKey && closest && closest.shape === 'triangle' && closest.splittable) {
+                const c = closest;
+                const leftHalf: UIMultiSliderHandle = { id: `${c.id}_left`, value: c.value, color: c.color, shape: 'left-half', label: c.label ? `${c.label} Min` : 'Min', splittable: c.splittable };
+                const rightHalf: UIMultiSliderHandle = { id: `${c.id}_right`, value: c.value, color: c.color, shape: 'right-half', label: c.label ? `${c.label} Max` : 'Max', splittable: c.splittable };
+                (leftHalf as any).originalId = c.id;
+                (leftHalf as any).originalLabel = c.label;
+                (leftHalf as any).originalSplittable = c.splittable;
+                (rightHalf as any).originalId = c.id;
+                (rightHalf as any).originalLabel = c.label;
+                (rightHalf as any).originalSplittable = c.splittable;
+                const idx = handles.indexOf(c);
+                if (idx !== -1) {
+                    handles.splice(idx, 1, leftHalf, rightHalf);
+                    const handleX = valToX(c.value as number);
+                    if (clickX >= handleX) {
+                        closest = rightHalf;
+                    } else {
+                        closest = leftHalf;
+                    }
+                    rebuildInputs();
+                    if (opts.onInput) opts.onInput(getStructuredValues(), handles);
+                }
+            }
+            if (closest && minDist < 15) {
+                activeHandle = closest;
+                isDragging = true;
+                const handleX = valToX(activeHandle.value as number);
+                const clickOffset = clickX - handleX;
+                draw();
+                const onMouseMove = (moveEvent: MouseEvent) => {
+                    if (!isDragging || !activeHandle) return;
+                    const moveRect = cvs.getBoundingClientRect();
+                    const moveX = ((moveEvent.clientX - moveRect.left) / moveRect.width) * currentLayoutWidth;
+                    activeHandle.value = xToVal(moveX - clickOffset);
+                    if ((activeHandle as any).textInputElement) {
+                        (activeHandle as any).textInputElement.value = (activeHandle.value as number).toFixed(precision);
+                    }
+                    draw();
+                    if (opts.onInput) opts.onInput(getStructuredValues(), handles);
+                };
+                const onMouseUp = () => {
+                    isDragging = false;
+                    checkAndMergeHandles();
+                    draw();
+                    if (opts.onChange) opts.onChange(getStructuredValues(), handles);
+                    window.removeEventListener('mousemove', onMouseMove);
+                    window.removeEventListener('mouseup', onMouseUp);
+                };
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', onMouseUp);
+            }
+        };
+        cvs.addEventListener('mousedown', handleMouseDown);
+        rebuildInputs();
+        trackWrapper.appendChild(cvs);
+        CanvasLib.setupDynamicResolution(cvs, (w, h, dpr) => {
+            currentLayoutWidth = w;
+            draw();
+        }, canvasHeight);
+        if (opts.label) {
+            container.appendChild(UI.createRow(opts.label, trackWrapper));
+        } else {
+            container.appendChild(trackWrapper);
+        }
+        container.appendChild(inputsRow);
+        return container;
     },
     
     createCanvas(opts: UICanvasOpts = {}): { element: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null } {
@@ -429,18 +694,14 @@ export const UI: UIInterface = {
     },
 
     createSection(title: string, ...children: any[]): HTMLElement {
-        return this.createNode('div', { style: { display: 'flex', flexDirection: 'column', gap: '5px', border: '1px solid #444', padding: '10px', borderRadius: '4px', marginBottom: '10px' } },
+        return this.createNode('div', { style: { display: 'flex', flexDirection: 'column', gap: '5px', border: '1px solid #444', padding: '10px', borderRadius: '4px', margin: '10px 0px' } },
             this.createNode('div', { style: { fontWeight: 'bold', fontSize: '12px', color: '#aaa', marginBottom: '5px' } }, title),
             ...children
         );
     },
 
-    createContainer(...children: any[]): HTMLElement {
-        return this.createNode('div', { style: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' } }, ...children);
-    },
-    
     createSubheading(text: string, color: string = '#eee'): HTMLElement {
-        return this.createNode('div', { style: { fontWeight: 'bold', color: color, fontSize: '12px',  marginTop: '5px', marginBottom: '10px' } }, text);
+        return this.createNode('div', { style: { fontWeight: 'bold', color: color, fontSize: '12px',  marginTop: '10px', marginBottom: '10px' } }, text);
     },
 
     createExpandableSection(opts: { title: string; initiallyExpanded?: boolean; style?: string | Partial<CSSStyleDeclaration> }, ...children: any[]): HTMLElement {
@@ -462,7 +723,7 @@ export const UI: UIInterface = {
     },
 
     createGrid(cols: number, children: any[], opts?: UILayoutOpts): HTMLElement {
-        const grid = this.createNode('div', { style: { display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: '8px', width: '100%', marginBottom: '10px' } });
+        const grid = this.createNode('div', { style: { display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: '8px', width: '100%', marginBottom: '8px' } });
         children.forEach(c => { if (c) grid.appendChild(c instanceof Node ? c : document.createTextNode(String(c))); });
         if (opts) {
             if (opts.style) {
@@ -470,13 +731,14 @@ export const UI: UIInterface = {
                 else Object.assign(grid.style, opts.style);
             }
             if (opts.className) grid.classList.add(opts.className);
+            if (opts.hidden === true) grid.style.display = 'none';
         }
         return grid;
     },
 
-    createFlexStack(orientation: 'horizontal' | 'vertical', children: any[], opts?: UILayoutOpts): HTMLElement {
+    createStack(orientation: 'horizontal' | 'vertical', children: any[], opts?: UILayoutOpts): HTMLElement {
         const isRow = orientation === 'horizontal';
-        const stack = this.createNode('div', { style: { display: 'flex', flexDirection: isRow ? 'row' : 'column', alignItems: isRow ? 'center' : 'stretch', justifyContent: isRow ? 'flex-start' : 'initial', gap: '6px', width: '100%', marginBottom: '10px' } });
+        const stack = this.createNode('div', { style: { display: 'flex', flexDirection: isRow ? 'row' : 'column', alignItems: isRow ? 'center' : 'stretch', justifyContent: isRow ? 'flex-start' : 'initial', gap: '0px', width: '100%', marginBottom: '8px' } });
         children.forEach(c => { if (c) stack.appendChild(c instanceof Node ? c : document.createTextNode(String(c))); });
         if (opts) {
             if (opts.style) {
@@ -484,6 +746,7 @@ export const UI: UIInterface = {
                 else Object.assign(stack.style, opts.style);
             }
             if (opts.className) stack.classList.add(opts.className);
+            if (opts.hidden === true) stack.style.display = 'none';
         }
         return stack;
     },
@@ -496,6 +759,7 @@ export const UI: UIInterface = {
                 else Object.assign(row.style, opts.style);
             }
             if (opts.className) row.classList.add(opts.className);
+            if (opts.hidden === true) row.style.display = 'none';
         }
         return row;
     }

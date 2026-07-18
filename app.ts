@@ -113,7 +113,7 @@ export interface AppActions {
     inverseSelection(): void;
     updateSelectionOutline(): void;
     saveSelection(mode?: 'content' | 'mask', inverse?: boolean): void;
-    loadSelection(layerIndex?: number, mode?: 'auto' | 'alpha' | 'grayscale', inverse?: boolean): void;
+    loadSelection(layerIndex?: number, mode?: 'auto' | 'alpha' | 'grayscale', inverse?: boolean, targetLayer?: Layer): void;
     openSaveSelectionDialog(): void;
     openLoadSelectionDialog(): void;
     moveLayer(dir: number): void;
@@ -341,14 +341,14 @@ export const App = {
         
         // Global System Clipboard Events
         document.addEventListener('copy', (e: ClipboardEvent) => {
-            const target = e.target as HTMLElement;
-            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+            if (!this.utils.isMainWorkspaceActive()) return;
+            const selection = window.getSelection();
+            if (selection && selection.toString().length > 0) { return; }
             e.preventDefault();
             this.actions.copy();
         });
         document.addEventListener('paste', (e: ClipboardEvent) => {
-            const target = e.target as HTMLElement;
-            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+            if (!this.utils.isMainWorkspaceActive()) return;
             e.preventDefault();
             this.actions.paste(e);
         });
@@ -477,7 +477,27 @@ export const App = {
             const list = document.getElementById('layer-list')!;
             list.innerHTML = '';
             [...App.state.layers].forEach(l => {
-                const item = UI.createNode('div', { className: `layer-item ${l.id===App.state.activeLayerId?'active':''}`, on: { click: () => App.actions.setActiveLayer(l.id) } },
+                const item = UI.createNode('div', {
+                    className: `layer-item ${l.id===App.state.activeLayerId?'active':''}`,
+                    on: {
+                        click: (e: Event) => {
+                            const me = e as MouseEvent;
+                            if (me.ctrlKey || me.metaKey) {
+                                me.preventDefault();
+                                me.stopPropagation();
+                                const activeL = App.utils.getActive();
+                                if (activeL) {
+                                    const idx = App.state.layers.indexOf(l);
+                                    if (idx >= 0) {
+                                        App.actions.loadSelection(idx, 'auto', false, activeL);
+                                    }
+                                }
+                                return;
+                            }
+                            App.actions.setActiveLayer(l.id);
+                        }
+                    }
+                },
                     UI.createNode('div', { className:`layer-vis ${l.visible?'visible':''}`, textContent: l.visible?'👁':'○', 
                         on: { click: (e: Event) => { e.stopPropagation(); App.actions.toggleVis(l.id); } } }),
                     UI.createNode('span', { className: 'layer-type-icon', textContent: l.type==='text'?'T':'' }),
@@ -571,6 +591,16 @@ export const App = {
                 if (pos.x >= 0 && pos.x <= App.state.width && pos.y >= 0 && pos.y <= App.state.height) {
                     App.state.mousePos = pos;
                 }
+                
+                // If selection is active, and Ctrl/Cmd is pressed, and we are in a selection tool, move the selection
+                if (App.state.selection.active && App.state.selection.mask !== null && (e.ctrlKey || e.metaKey) && ['select', 'lasso', 'select-brush'].includes(App.state.tool)) {
+                    App.actions.saveState();
+                    App.state.movingSelection = true;
+                    App.state.lastMovePos = { x: pos.x, y: pos.y };
+                    App.state.isDrawing = true;
+                    return;
+                }
+
                 if (t && t.onMouseDown) t.onMouseDown(e);
             }
         },
@@ -588,6 +618,31 @@ export const App = {
             } else {
                 App.state.mousePos = null;
             }
+            
+            if (App.state.movingSelection && App.state.isDrawing) {
+                const l = App.utils.getActive();
+                if (l) {
+                    const idx = Math.round((pos.x - App.state.lastMovePos.x) * (l.canvas.width / l.width));
+                    const idy = Math.round((pos.y - App.state.lastMovePos.y) * (l.canvas.height / l.height));
+                    if (idx !== 0 || idy !== 0) {
+                        const sel = App.state.selection;
+                        const temp = document.createElement('canvas');
+                        temp.width = sel.mask!.width;
+                        temp.height = sel.mask!.height;
+                        const tempCtx = temp.getContext('2d')!;
+                        tempCtx.drawImage(sel.mask!, idx, idy);
+                        const mCtx = sel.ctx || sel.mask!.getContext('2d')!;
+                        mCtx.clearRect(0, 0, sel.mask!.width, sel.mask!.height);
+                        mCtx.drawImage(temp, 0, 0);
+                        sel.outline = null;
+                        App.state.lastMovePos.x += idx * (l.width / l.canvas.width);
+                        App.state.lastMovePos.y += idy * (l.height / l.canvas.height);
+                    }
+                    App.render();
+                }
+                return;
+            }
+
             const t = App.getTool();
             if (t && t.onMouseMove) t.onMouseMove(e);
             if (t && t.drawUI) {
@@ -598,6 +653,15 @@ export const App = {
             if (App.panState && App.panState.active) {
                 App.panState.active = false;
                 App.els.workspace.style.cursor = App.spacePressed ? 'grab' : '';
+                return;
+            }
+            if (App.state.movingSelection) {
+                App.state.movingSelection = false;
+                App.state.isDrawing = false;
+                if (App.state.selection.active) {
+                    App.state.selection.outline = null;
+                }
+                App.render();
                 return;
             }
             const t = App.getTool(); 
@@ -645,6 +709,19 @@ export const App = {
             if (!l) return false;
             const def = Layers.get(l.type);
             return def && def.traits && def.traits[trait];
+        },
+        isMainWorkspaceActive: () => {
+            if (document.querySelector('.popup-overlay') || document.querySelector('.fs-workspace-overlay')) {
+                return false;
+            }
+            const ae = document.activeElement;
+            if (ae) {
+                const tag = ae.tagName.toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || tag === 'select' || (ae as HTMLElement).isContentEditable) {
+                    return false;
+                }
+            }
+            return true;
         },
         getPos: (e: MouseEvent | TouchEvent | AppPointerEvent) => {
             const r = App.els.canvas.getBoundingClientRect();

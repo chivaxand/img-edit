@@ -1,6 +1,7 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layers } from '~/layers';
+import { Lib } from '~/libs/index';
 
 export const SvgExport = {
     settings: {
@@ -188,26 +189,10 @@ export const SvgExport = {
         const canvasW = App.state.width;
         const canvasH = App.state.height;
 
-        const tempCv = document.createElement('canvas');
-        tempCv.width = canvasW;
-        tempCv.height = canvasH;
-        const tempCtx = tempCv.getContext('2d')!;
-
-        if (this.settings.format === 'image/jpeg') {
-            tempCtx.fillStyle = this.settings.bgColor;
-            tempCtx.fillRect(0, 0, canvasW, canvasH);
-        }
-
-        for (let i = App.state.layers.length - 1; i >= 0; i--) {
-            const l = App.state.layers[i];
-            if (l.visible) {
-                tempCtx.save();
-                tempCtx.globalAlpha = l.opacity;
-                tempCtx.globalCompositeOperation = (l.blend || 'source-over') as GlobalCompositeOperation;
-                Layers.render(tempCtx, l);
-                tempCtx.restore();
-            }
-        }
+        const tempCv = Lib.canvas.renderMerged(App.state.layers, canvasW, canvasH, {
+            bgColor: this.settings.format === 'image/jpeg' ? this.settings.bgColor : undefined,
+            forExport: true
+        });
 
         let baseName = 'export';
         const stateAny = App.state as any;

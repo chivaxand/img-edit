@@ -9,6 +9,7 @@ import { SolidColor } from './solid-color';
 import { PatchMatch } from './patch-match';
 import { TeleaFMM } from './telea-fmm';
 import { CoherenceTransportFMM } from './coherence-transport-fmm';
+import { PatchMatchCImg } from './patch-match-cimg';
 
 export interface InpaintParameter {
     id: string;
@@ -61,8 +62,8 @@ export const INPAINT_ALGORITHMS: InpaintAlgorithm[] = [
         apply: (layer, mask, settings, softness) => Diffusion.inpaintHarmonic(layer, mask, settings.harmonicIterations, settings.harmonicOmega, softness)
     },
     {
-        id: 'patch',
-        name: 'Patch-Based',
+        id: 'patch_match',
+        name: 'Patch match',
         defaultSettings: { patchRadius: 4, patchAccuracy: 50, patchSharpness: 0.0 },
         parameters: [
             { id: 'patchRadius', label: 'Patch Radius', type: 'slider', min: 2, max: 8, step: 1 },
@@ -70,6 +71,42 @@ export const INPAINT_ALGORITHMS: InpaintAlgorithm[] = [
             { id: 'patchSharpness', label: 'Texture Sharpness', type: 'slider', min: 0, max: 100, step: 5 }
         ],
         apply: (layer, mask, settings, softness) => PatchMatch.inpaint(layer, mask, settings.patchRadius, settings.patchAccuracy, settings.patchSharpness / 100, softness)
+    },
+    {
+        id: 'patch_match_cimg',
+        name: 'Patch match (CImg)',
+        defaultSettings: { 
+            cimgPatchSize: 11, 
+            cimgLookupSize: 35, 
+            cimgBlendSize: 15, 
+            cimgBlendScales: 10, 
+            cimgBlendOuter: 'true',
+            cimgBlendThreshold: 0.0,
+            cimgBlendDecay: 0.05
+        },
+        parameters: [
+            { id: 'cimgPatchSize', label: 'Patch Size', type: 'slider', min: 3, max: 21, step: 2 },
+            { id: 'cimgLookupSize', label: 'Lookup Size', type: 'slider', min: 4, max: 64, step: 2 },
+            { id: 'cimgBlendSize', label: 'Blend Size', type: 'slider', min: 0, max: 50, step: 1 },
+            { id: 'cimgBlendScales', label: 'Blend Scales', type: 'slider', min: 0, max: 20, step: 1 },
+            { id: 'cimgBlendThreshold', label: 'Blend Threshold', type: 'slider', min: 0.0, max: 1.0, step: 0.05 },
+            { id: 'cimgBlendDecay', label: 'Blend Decay', type: 'slider', min: 0.01, max: 0.2, step: 0.01 },
+            { id: 'cimgBlendOuter', label: 'Blend Outer Boundary', type: 'select', options: [{ value: 'true', text: 'Enabled' }, { value: 'false', text: 'Disabled' }] }
+        ],
+        apply: (layer, mask, settings, softness) => PatchMatchCImg.inpaint(
+            layer,
+            mask,
+            settings.cimgPatchSize,
+            settings.cimgLookupSize,
+            1.0,
+            1,
+            settings.cimgBlendSize,
+            settings.cimgBlendScales,
+            settings.cimgBlendOuter === 'true',
+            softness,
+            settings.cimgBlendThreshold,
+            settings.cimgBlendDecay
+        )
     },
     {
         id: 'telea',

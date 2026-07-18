@@ -715,7 +715,7 @@ App.registerTool({
         const lx = App.utils.toLocal(l, pos.x, 'x');
         const ly = App.utils.toLocal(l, pos.y, 'y');
 
-        if (e.ctrlKey || e.metaKey) this.currentMode = 'add';
+        if (e.shiftKey) this.currentMode = 'add';
         else if (e.altKey) this.currentMode = 'sub';
         else this.currentMode = this.settings.mode || 'new';
 

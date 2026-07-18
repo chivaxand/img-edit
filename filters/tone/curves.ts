@@ -48,22 +48,15 @@ Filters.register('curves', {
         const w = layer.canvas.width, h = layer.canvas.height;
         const srcData = layer.ctx.getImageData(0, 0, w, h).data;
         
-        const histR = new Uint32Array(256);
-        const histG = new Uint32Array(256);
-        const histB = new Uint32Array(256);
-        const histA = new Uint32Array(256);
+        const histR = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 0), { bins: 256, range: [0, 255] });
+        const histG = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 1), { bins: 256, range: [0, 255] });
+        const histB = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 2), { bins: 256, range: [0, 255] });
+        const histA = Lib.image.histogram(Lib.image.extractChannel(srcData, w, h, 3), { bins: 256, range: [0, 255] });
         let maxCount = 0;
         let maxCountAlpha = 0;
         
-        for (let i = 0; i < srcData.length; i += 4) {
-            histR[srcData[i]]++;
-            histG[srcData[i+1]]++;
-            histB[srcData[i+2]]++;
-            histA[srcData[i+3]]++;
-        }
-        
         // Find global max
-        for(let i=0; i<256; i++) {
+        for (let i = 0; i < 256; i++) {
             maxCount = Math.max(maxCount, histR[i], histG[i], histB[i]);
             maxCountAlpha = Math.max(maxCountAlpha, histA[i]);
         }

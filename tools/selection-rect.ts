@@ -26,7 +26,7 @@ App.registerTool({
                 this.settings.mode = v;
             }
         }));
-        panel.appendChild(UI.createHint('Drag to select. Ctrl=Add, Alt=Subtract. Ctrl+A to Deselect.'));
+        panel.appendChild(UI.createHint('Drag to select. Shift=Add, Alt=Subtract. Ctrl+D to Deselect.'));
     },
 
     onMouseDown(e: MouseEvent) {
@@ -37,7 +37,7 @@ App.registerTool({
         this.start = App.utils.getPos(e);
         
         // Determine mode based on keys
-        if (e.ctrlKey || e.metaKey) this.mode = 'add';
+        if (e.shiftKey) this.mode = 'add';
         else if (e.altKey) this.mode = 'sub';
         else this.mode = this.settings.mode || 'new';
     },

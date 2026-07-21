@@ -33,7 +33,8 @@ export const Menu = {
             items: [
                 { label: 'Undo (Ctrl+Z)', action: () => App.actions.undo() },
                 { label: 'Copy (Ctrl+C)', action: () => App.actions.copy() },
-                { label: 'Paste (Ctrl+V)', action: () => App.actions.paste() }
+                { label: 'Paste (Ctrl+V)', action: () => App.actions.paste() },
+                { label: 'Revert to History State...', action: () => App.actions.openRevertHistoryDialog() }
             ]
         },
         {

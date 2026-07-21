@@ -1,13 +1,15 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { drawActiveBrushCircle } from './basics';
+import { drawActiveBrushCircle } from './tools';
 
-App.registerTool({
-    id: 'liquify',
+export const LiquifyTool = {
+    id: 'liquify' as const,
     icon: '🌀',
     title: 'Liquify Brush',
+    sortOrder: 160,
     settings: { size: 60, strength: 50 },
+    requiresEditableLayer: true,
 
     lastPos: null as { x: number, y: number } | null,
     origCanvas: null as HTMLCanvasElement | null,
@@ -104,6 +106,9 @@ App.registerTool({
         const xEnd = Math.min(w, ex);
         const yEnd = Math.min(h, ey);
 
+        const sel = App.state.selection;
+        const hasSel = sel.active && sel.mask && sel.layerId === layer.id;
+
         // Update displacement fields inside brush radius with Gaussian falloff
         for (let y = yStart; y < yEnd; y++) {
             const dy_pixel = y - cy;
@@ -132,6 +137,14 @@ App.registerTool({
 
         const imgData = layer.ctx.getImageData(minX, minY, dWidth, dHeight);
         const data = imgData.data;
+
+        let selData: Uint8ClampedArray | null = null;
+        if (hasSel && sel.mask) {
+            const sCtx = sel.mask.getContext('2d') || sel.ctx;
+            if (sCtx) {
+                selData = sCtx.getImageData(minX, minY, dWidth, dHeight).data;
+            }
+        }
 
         // Catmull-Rom cubic spline interpolator
         const cubicSpline = (p0: number, p1: number, p2: number, p3: number, t: number) => {
@@ -177,8 +190,14 @@ App.registerTool({
                 const globalIdx = y * w + x;
                 const localIdx = (localY * dWidth + localX) * 4;
 
-                const displaceX = this.disX![globalIdx];
-                const displaceY = this.disY![globalIdx];
+                let displaceX = this.disX![globalIdx];
+                let displaceY = this.disY![globalIdx];
+
+                if (selData) {
+                    const selAlpha = selData[localIdx + 3] / 255;
+                    displaceX *= selAlpha;
+                    displaceY *= selAlpha;
+                }
 
                 const srcX = x - displaceX;
                 const srcY = y - displaceY;
@@ -192,4 +211,13 @@ App.registerTool({
 
         layer.ctx.putImageData(imgData, minX, minY);
     }
-});
+};
+
+
+declare global {
+    interface ToolRegistry {
+        liquify: typeof LiquifyTool;
+    }
+}
+
+App.registerTool(LiquifyTool);

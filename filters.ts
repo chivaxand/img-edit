@@ -62,7 +62,7 @@ export const Filters = {
         if(!l || !App.utils.layerIs(l, 'filterable')) { alert('This layer type cannot be filtered. Rasterize it first.'); return; }
 
         if(!def.params && !def.renderUI) {
-            App.actions.saveState();
+            App.actions.saveState(def.name);
             this.applyEffect(l, def, {});
             return;
         }
@@ -282,7 +282,7 @@ export const Filters = {
             },
             commit: (vals: any) => {
                 restore();
-                App.actions.saveState();
+                App.actions.saveState(def.name);
 
                 const chkNewLayer = p.getById('chk-new-layer') as HTMLInputElement;
                 if (chkNewLayer && chkNewLayer.checked) {

@@ -2,10 +2,12 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
-App.registerTool({
-    id: 'select',
+export const SelectionRectTool = {
+    id: 'selectionRect' as const,
     icon: '⬚',
     title: 'Rectangle Select',
+    isSelectionTool: true,
+    sortOrder: 30,
     settings: { mode: 'new' },
 
     // State
@@ -134,4 +136,13 @@ App.registerTool({
 
         App.render();
     }
-});
+};
+
+
+declare global {
+    interface ToolRegistry {
+        selectionRect: typeof SelectionRectTool;
+    }
+}
+
+App.registerTool(SelectionRectTool);

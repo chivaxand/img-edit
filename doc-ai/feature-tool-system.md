@@ -56,7 +56,7 @@ Because layers can be moved independently of the main canvas, mouse coordinates 
 ## Tool Implementation Template
 
 ```typescript
-App.registerTool({
+export const !!!Tool = {
     id: 'my-tool',
     icon: '✦',
     title: 'My Custom Tool',

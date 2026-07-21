@@ -1,4 +1,4 @@
-import { App, AppActions } from '~/app';
+import { App, AppActions, ToolId } from '~/app';
 import { UI } from '~/ui';
 import { Filters } from '~/filters';
 import { JpegExport } from './jpeg-export';
@@ -7,6 +7,7 @@ import { SvgExport } from './svg-export';
 import { Lib } from '~/libs/index';
 
 export interface IScriptAPI {
+    setTool(t: ToolId): void;
     resizeCanvas(w: number, h: number): void;
     increaseCanvasSize(percent: number): void;
     addEmptyLayer(): void;
@@ -49,7 +50,10 @@ export interface IScriptAPI {
     }): void;
 }
 
-export const ScriptAPI: IScriptAPI = {
+const coreScriptAPI = {
+    setTool(t: ToolId) {
+        App.actions.setTool(t);
+    },
     // --- Canvas Dimensions ---
     resizeCanvas(w: number, h: number) {
         App.actions.resizeCanvas(w, h);
@@ -346,6 +350,18 @@ export const ScriptAPI: IScriptAPI = {
         SvgExport.generate();
     }
 };
+
+export const ScriptAPI = new Proxy(coreScriptAPI as any, {
+    get(target, propKey) {
+        if (typeof propKey === 'string') {
+            if (propKey in target) return target[propKey];
+            if (App.macroCommands && App.macroCommands[propKey]) {
+                return App.macroCommands[propKey];
+            }
+        }
+        return undefined;
+    }
+}) as any;
 
 export const scriptActions: Pick<AppActions, 'openMacroRunner' | 'toggleRecording' | 'clearRecording'> = {
     toggleRecording() {

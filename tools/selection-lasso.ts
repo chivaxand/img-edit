@@ -2,10 +2,12 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
-App.registerTool({
-    id: 'lasso',
+export const LassoTool = {
+    id: 'lasso' as const,
     icon: '➰',
     title: 'Lasso Select',
+    isSelectionTool: true,
+    sortOrder: 40,
     settings: { type: 'free', magneticRadius: 30, searchRadius: 40, threshold: 30, anchorGap: 40, mode: 'new', autoAnchor: true },
 
     points: [] as any[],
@@ -1157,7 +1159,7 @@ App.registerTool({
         this.autoAnchorRedrawn = [];
         this.autoAnchorTimes = [];
     }
-});
+};
 
 class DijkstraHeap {
     private heap: number[] = [];
@@ -1228,3 +1230,12 @@ class DijkstraHeap {
         return this.heap.length;
     }
 }
+
+
+declare global {
+    interface ToolRegistry {
+        lasso: typeof LassoTool;
+    }
+}
+
+App.registerTool(LassoTool);

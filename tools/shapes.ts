@@ -4,14 +4,15 @@ import { Layer } from '~/layers';
 import { Lib } from '~/libs/index';
 
 // Shape Tools: Line
-App.registerTool({
-    id: 'line',
+export const LineTool = {
+    id: 'line' as const,
     icon: '╱',
     title: 'Line',
+    sortOrder: 180,
     settings: { stroke: 4, startCap: 'none', endCap: 'none' },
     onSelect(panel: HTMLElement) {
         const s = this.settings;
-        const set = (k: string, v: any) => this.settings[k] = v;
+        const set = (k: string, v: any) => (this.settings as any)[k] = v;
 
         panel.appendChild(UI.createRow('Thickness', UI.createInput('number', { value: s.stroke }, (v: HTMLInputElement) => set('stroke', parseInt(v.value) || 1))));
 
@@ -166,92 +167,160 @@ App.registerTool({
 
         ctx.restore();
     }
-});
+};
 
-// Shape Tools: Rect, Circle
-[
-    { id: 'rect', icon: '⬜', title: 'Rect' },
-    { id: 'circle', icon: '◯', title: 'Circle' }
-].forEach(tool => {
-    App.registerTool({
-        id: tool.id,
-        icon: tool.icon,
-        title: tool.title,
-        settings: { stroke: 2, fill: true, useStroke: false, radius: 0 },
-        onSelect(panel: HTMLElement) {
-            const s = this.settings;
-            const set = (k: string, v: any) => this.settings[k] = v;
-            panel.appendChild(UI.createRow('Stroke', UI.createInput('number', {value:s.stroke}, (v: HTMLInputElement) => set('stroke', parseInt(v.value)))));
-            const checkRow = UI.createNode('div', {style:{display:'flex', gap:'15px'}});
-            checkRow.appendChild(UI.createCheckbox({ label: 'Stroke', value: s.useStroke, onChange: (v: boolean) => set('useStroke', v) }));
-            checkRow.appendChild(UI.createCheckbox({ label: 'Fill', value: s.fill, onChange: (v: boolean) => set('fill', v) }));
-            panel.appendChild(UI.createRow(null, checkRow));
+// Shape Tools: Rect
+export const RectTool = {
+    id: 'rect' as const,
+    icon: '⬜',
+    title: 'Rect',
+    sortOrder: 181,
+    settings: { stroke: 2, fill: true, useStroke: false, radius: 0 },
+    onSelect(panel: HTMLElement) {
+        const s = this.settings;
+        const set = (k: string, v: any) => (this.settings as any)[k] = v;
+        panel.appendChild(UI.createRow('Stroke', UI.createInput('number', {value:s.stroke}, (v: HTMLInputElement) => set('stroke', parseInt(v.value)))));
+        const checkRow = UI.createNode('div', {style:{display:'flex', gap:'15px'}});
+        checkRow.appendChild(UI.createCheckbox({ label: 'Stroke', value: s.useStroke, onChange: (v: boolean) => set('useStroke', v) }));
+        checkRow.appendChild(UI.createCheckbox({ label: 'Fill', value: s.fill, onChange: (v: boolean) => set('fill', v) }));
+        panel.appendChild(UI.createRow(null, checkRow));
+        panel.appendChild(UI.createRow('Radius', UI.createInput('number', {value:s.radius}, (v: HTMLInputElement) => set('radius', parseInt(v.value)))));
+    },
+    onMouseDown(e: MouseEvent) {
+        const l = App.utils.getActive();
+        if (!l || !l.visible) return;
+        if(l.type === 'text') { alert('Rasterize text layer to draw on it.'); return; }
+        
+        App.actions.saveState();
+        App.state.isDrawing = true;
+        App.state.start = App.utils.getPos(e);
+    },
+    onMouseMove(e: MouseEvent) {
+        if (!App.state.isDrawing) return;
+        App.render(); 
+        const pos = App.utils.getPos(e);
+        // Draw Preview
+        const ctx = App.els.ctx;
+        const s = App.state.start;
+        const set = this.settings;
+        ctx.save();
+        ctx.strokeStyle = App.state.fg; 
+        ctx.fillStyle = App.state.bg; 
+        ctx.lineWidth = set.stroke;
+        ctx.beginPath();
+        const w = pos.x - s.x, h = pos.y - s.y;
+        if(ctx.roundRect) ctx.roundRect(s.x, s.y, w, h, set.radius); else ctx.rect(s.x, s.y, w, h);
+        if(set.fill) ctx.fill();
+        if(set.useStroke) ctx.stroke();
+        ctx.restore();
+    },
+    onMouseUp(e: MouseEvent) {
+        if (!App.state.isDrawing) return;
+        App.state.isDrawing = false;
+        const l = App.utils.getActive();
+        if (!l) return;
+        const pos = App.utils.getPos(e);
+        const sx = App.utils.toLocal(l, App.state.start.x, 'x'), sy = App.utils.toLocal(l, App.state.start.y, 'y');
+        const ex = App.utils.toLocal(l, pos.x, 'x'), ey = App.utils.toLocal(l, pos.y, 'y');
+        
+        Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
+            App.utils.prepCtx(ctx, this.settings);
+            ctx.strokeStyle = App.state.fg;
+            ctx.fillStyle = App.state.bg;
+            ctx.lineWidth = this.settings.stroke;
 
-            if(tool.id === 'rect') {
-                panel.appendChild(UI.createRow('Radius', UI.createInput('number', {value:s.radius}, (v: HTMLInputElement) => set('radius', parseInt(v.value)))));
-            }
-        },
-        onMouseDown(e: MouseEvent) {
-            const l = App.utils.getActive();
-            if (!l || !l.visible) return;
-            if(l.type === 'text') { alert('Rasterize text layer to draw on it.'); return; }
-            
-            App.actions.saveState();
-            App.state.isDrawing = true;
-            App.state.start = App.utils.getPos(e);
-        },
-        onMouseMove(e: MouseEvent) {
-            if (!App.state.isDrawing) return;
-            App.render(); 
-            const pos = App.utils.getPos(e);
-            // Draw Preview
-            const ctx = App.els.ctx;
-            const s = App.state.start;
-            const set = this.settings;
-            ctx.save();
-            ctx.strokeStyle = App.state.fg; 
-            ctx.fillStyle = App.state.bg; 
-            ctx.lineWidth = set.stroke;
             ctx.beginPath();
-            const w = pos.x - s.x, h = pos.y - s.y;
-            if(tool.id === 'rect') {
-                if(ctx.roundRect) ctx.roundRect(s.x, s.y, w, h, set.radius); else ctx.rect(s.x, s.y, w, h);
-            } else {
-                ctx.ellipse(s.x+w/2, s.y+h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
-            }
-            if(set.fill) ctx.fill();
-            if(set.useStroke) ctx.stroke();
-            ctx.restore();
-        },
-        onMouseUp(e: MouseEvent) {
-            if (!App.state.isDrawing) return;
-            App.state.isDrawing = false;
-            const l = App.utils.getActive();
-            if (!l) return;
-            const pos = App.utils.getPos(e);
-            const sx = App.utils.toLocal(l, App.state.start.x, 'x'), sy = App.utils.toLocal(l, App.state.start.y, 'y');
-            const ex = App.utils.toLocal(l, pos.x, 'x'), ey = App.utils.toLocal(l, pos.y, 'y');
-            
-            Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
-                App.utils.prepCtx(ctx, this.settings);
-                ctx.strokeStyle = App.state.fg;
-                ctx.fillStyle = App.state.bg;
-                ctx.lineWidth = this.settings.stroke;
+            const w = ex-sx, h = ey-sy;
+            if(ctx.roundRect) ctx.roundRect(sx, sy, w, h, this.settings.radius);
+            else ctx.rect(sx, sy, w, h);
+            if(this.settings.fill) ctx.fill();
+            if(this.settings.useStroke) ctx.stroke();
+        });
+        
+        App.recordAction(`api.drawShape('rect', ${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, ${this.settings.fill}, ${this.settings.useStroke}, ${this.settings.radius});`);
+        App.render();
+    }
+};
 
-                ctx.beginPath();
-                const w = ex-sx, h = ey-sy;
-                if(tool.id === 'rect') {
-                    if(ctx.roundRect) ctx.roundRect(sx, sy, w, h, this.settings.radius);
-                    else ctx.rect(sx, sy, w, h);
-                } else {
-                    ctx.ellipse(sx+w/2, sy+h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
-                }
-                if(this.settings.fill) ctx.fill();
-                if(this.settings.useStroke) ctx.stroke();
-            });
-            
-            App.recordAction(`api.drawShape('${tool.id}', ${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, ${this.settings.fill}, ${this.settings.useStroke}, ${this.settings.radius});`);
-            App.render();
-        }
-    });
-});
+// Shape Tools: Circle
+export const CircleTool = {
+    id: 'circle' as const,
+    icon: '◯',
+    title: 'Circle',
+    sortOrder: 182,
+    settings: { stroke: 2, fill: true, useStroke: false, radius: 0 },
+    onSelect(panel: HTMLElement) {
+        const s = this.settings;
+        const set = (k: string, v: any) => (this.settings as any)[k] = v;
+        panel.appendChild(UI.createRow('Stroke', UI.createInput('number', {value:s.stroke}, (v: HTMLInputElement) => set('stroke', parseInt(v.value)))));
+        const checkRow = UI.createNode('div', {style:{display:'flex', gap:'15px'}});
+        checkRow.appendChild(UI.createCheckbox({ label: 'Stroke', value: s.useStroke, onChange: (v: boolean) => set('useStroke', v) }));
+        checkRow.appendChild(UI.createCheckbox({ label: 'Fill', value: s.fill, onChange: (v: boolean) => set('fill', v) }));
+        panel.appendChild(UI.createRow(null, checkRow));
+    },
+    onMouseDown(e: MouseEvent) {
+        const l = App.utils.getActive();
+        if (!l || !l.visible) return;
+        if(l.type === 'text') { alert('Rasterize text layer to draw on it.'); return; }
+        
+        App.actions.saveState();
+        App.state.isDrawing = true;
+        App.state.start = App.utils.getPos(e);
+    },
+    onMouseMove(e: MouseEvent) {
+        if (!App.state.isDrawing) return;
+        App.render(); 
+        const pos = App.utils.getPos(e);
+        // Draw Preview
+        const ctx = App.els.ctx;
+        const s = App.state.start;
+        const set = this.settings;
+        ctx.save();
+        ctx.strokeStyle = App.state.fg; 
+        ctx.fillStyle = App.state.bg; 
+        ctx.lineWidth = set.stroke;
+        ctx.beginPath();
+        const w = pos.x - s.x, h = pos.y - s.y;
+        ctx.ellipse(s.x+w/2, s.y+h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
+        if(set.fill) ctx.fill();
+        if(set.useStroke) ctx.stroke();
+        ctx.restore();
+    },
+    onMouseUp(e: MouseEvent) {
+        if (!App.state.isDrawing) return;
+        App.state.isDrawing = false;
+        const l = App.utils.getActive();
+        if (!l) return;
+        const pos = App.utils.getPos(e);
+        const sx = App.utils.toLocal(l, App.state.start.x, 'x'), sy = App.utils.toLocal(l, App.state.start.y, 'y');
+        const ex = App.utils.toLocal(l, pos.x, 'x'), ey = App.utils.toLocal(l, pos.y, 'y');
+        
+        Lib.canvas.drawSelectionMasked(l, App.state.selection, (ctx) => {
+            App.utils.prepCtx(ctx, this.settings);
+            ctx.strokeStyle = App.state.fg;
+            ctx.fillStyle = App.state.bg;
+            ctx.lineWidth = this.settings.stroke;
+
+            ctx.beginPath();
+            const w = ex-sx, h = ey-sy;
+            ctx.ellipse(sx+w/2, sy+h/2, Math.abs(w)/2, Math.abs(h)/2, 0, 0, Math.PI*2);
+            if(this.settings.fill) ctx.fill();
+            if(this.settings.useStroke) ctx.stroke();
+        });
+        
+        App.recordAction(`api.drawShape('circle', ${Math.round(sx)}, ${Math.round(sy)}, ${Math.round(ex)}, ${Math.round(ey)}, ${this.settings.stroke}, ${this.settings.fill}, ${this.settings.useStroke}, ${this.settings.radius});`);
+        App.render();
+    }
+};
+
+declare global {
+    interface ToolRegistry {
+        line: typeof LineTool;
+        rect: typeof RectTool;
+        circle: typeof CircleTool;
+    }
+}
+
+App.registerTool(LineTool);
+App.registerTool(RectTool);
+App.registerTool(CircleTool);

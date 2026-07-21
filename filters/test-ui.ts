@@ -59,6 +59,7 @@ Filters.register('test-ui', {
                 pixels[idx]     = Math.max(0, Math.min(255, Math.round(r * factor * (color[0] / 255))));
                 pixels[idx + 1] = Math.max(0, Math.min(255, Math.round(g * factor * (color[1] / 255))));
                 pixels[idx + 2] = Math.max(0, Math.min(255, Math.round(b * factor * (color[2] / 255))));
+                pixels[idx + 3] = 255;
             }
         }
 

@@ -9,7 +9,7 @@ export const selectionActions: Pick<AppActions,
 > = {
     deselect() {
         if (App.state.selection.active) {
-            App.actions.saveState();
+            App.actions.saveState("Deselect");
         }
         App.state.selection.active = false;
         App.state.selection.mask = null;
@@ -23,7 +23,7 @@ export const selectionActions: Pick<AppActions,
     selectAll() {
         const l = App.utils.getActive();
         if (!l) return;
-        App.actions.saveState();
+        App.actions.saveState("Select All");
 
         if (!App.state.selection.mask || App.state.selection.layerId !== l.id) {
             App.state.selection.layerId = l.id;
@@ -63,7 +63,7 @@ export const selectionActions: Pick<AppActions,
         const l = App.utils.getActive();
         if (!l || !l.visible || l.id !== sel.layerId) return;
         if (l.type === 'text') { alert('Rasterize text layer to delete selection.'); return; }
-        App.actions.saveState();
+        App.actions.saveState("Delete Selection");
         l.ctx.save();
         l.ctx.globalCompositeOperation = 'destination-out';
         l.ctx.drawImage(sel.mask, 0, 0);
@@ -74,7 +74,7 @@ export const selectionActions: Pick<AppActions,
     },
 
     inverseSelection() {
-        App.actions.saveState();
+        App.actions.saveState("Inverse Selection");
         const sel = App.state.selection;
         if (!sel.active || !sel.mask) {
             const l = App.utils.getActive();
@@ -216,7 +216,7 @@ export const selectionActions: Pick<AppActions,
         const layer = App.state.layers[layerIndex];
         if (!layer) return;
 
-        App.actions.saveState();
+        App.actions.saveState("Load Selection");
 
         const { canvas: maskCanvas, ctx: mCtx } = Lib.canvas.create(layer.canvas.width, layer.canvas.height);
         const imgData = layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height);

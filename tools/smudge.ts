@@ -1,119 +1,13 @@
 import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
+import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './tools';
 
-// Low-discrepancy Halton sequence generator for high-performance canvas sampling
-function halton(index: number, base: number): number {
-    let result = 0;
-    let f = 1 / base;
-    let i = index;
-    while (i > 0) {
-        result += f * (i % base);
-        i = Math.floor(i / base);
-        f = f / base;
-    }
-    return result;
-}
-
-// Samples color under the brush using Krita-like convergence logic
-function sampleCanvasColor(
-    ctx: CanvasRenderingContext2D,
-    cx: number, cy: number,
-    radius: number,
-    brushData: Uint8ClampedArray | null,
-    size: number,
-    fallbackColor: { r: number, g: number, b: number }
-): { r: number, g: number, b: number, a: number } {
-    if (radius <= 2) {
-        const img = ctx.getImageData(Math.round(cx), Math.round(cy), 1, 1);
-        const a = img.data[3];
-        if (a > 0) {
-            return { r: img.data[0], g: img.data[1], b: img.data[2], a };
-        }
-        return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
-    }
-
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
-    const rx = Math.round(cx - radius);
-    const ry = Math.round(cy - radius);
-    const rw = Math.round(radius * 2);
-    const rh = Math.round(radius * 2);
-
-    const sx = Math.max(0, Math.min(width - rw, rx));
-    const sy = Math.max(0, Math.min(height - rh, ry));
-    if (rw <= 0 || rh <= 0) {
-        return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
-    }
-
-    const imgData = ctx.getImageData(sx, sy, rw, rh);
-    const data = imgData.data;
-
-    let sumR = 0, sumG = 0, sumB = 0, sumA = 0;
-    let count = 0;
-    let alphaCount = 0;
-
-    const minSamples = Math.min(rw * rh, 64);
-    const maxSamples = Math.min(rw * rh, 256);
-
-    let lastR = 0, lastG = 0, lastB = 0, lastA = 0;
-
-    for (let i = 1; i <= maxSamples; i++) {
-        const hx = Math.floor(halton(i, 2) * rw);
-        const hy = Math.floor(halton(i, 3) * rh);
-
-        const dx = hx - radius;
-        const dy = hy - radius;
-        if (dx * dx + dy * dy <= radius * radius) {
-            const idx = (hy * rw + hx) * 4;
-            if (idx >= 0 && idx < data.length) {
-                let weight = 1;
-                if (brushData && size === rw) {
-                    weight = brushData[idx + 3] / 255;
-                }
-                const pixelAlpha = data[idx + 3] / 255;
-                const totalWeight = weight * pixelAlpha;
-
-                sumR += data[idx] * totalWeight;
-                sumG += data[idx + 1] * totalWeight;
-                sumB += data[idx + 2] * totalWeight;
-                sumA += data[idx + 3] * weight;
-                count += totalWeight;
-                alphaCount += weight;
-            }
-        }
-
-        // Convergence evaluation check
-        if (i >= minSamples && i % 16 === 0 && count > 0) {
-            const currR = sumR / count;
-            const currG = sumG / count;
-            const currB = sumB / count;
-            const currA = sumA / alphaCount;
-
-            if (i > minSamples) {
-                const diff = Math.abs(currR - lastR) + Math.abs(currG - lastG) + Math.abs(currB - lastB) + Math.abs(currA - lastA);
-                if (diff < 2) {
-                    break;
-                }
-            }
-            lastR = currR;
-            lastG = currG;
-            lastB = currB;
-            lastA = currA;
-        }
-    }
-
-    if (count > 0 && alphaCount > 0) {
-        return { r: sumR / count, g: sumG / count, b: sumB / count, a: sumA / alphaCount };
-    }
-    return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
-}
-
-App.registerTool({
-    id: 'smudge',
+export const SmudgeTool = {
+    id: 'smudge' as const,
     icon: '🧽',
     title: 'Smudge Tool (S)',
+    sortOrder: 150,
     settings: { 
         size: 30, 
         hardness: 50, 
@@ -124,6 +18,7 @@ App.registerTool({
         smearAlpha: true,
         mode: 'smearing'
     },
+    requiresEditableLayer: true,
     
     // Offscreen buffers
     brushData: null as Uint8ClampedArray | null,
@@ -513,4 +408,120 @@ App.registerTool({
             this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
         }
     }
-});
+};
+
+// Low-discrepancy Halton sequence generator for high-performance canvas sampling
+function halton(index: number, base: number): number {
+    let result = 0;
+    let f = 1 / base;
+    let i = index;
+    while (i > 0) {
+        result += f * (i % base);
+        i = Math.floor(i / base);
+        f = f / base;
+    }
+    return result;
+}
+
+// Samples color under the brush using Krita-like convergence logic
+function sampleCanvasColor(
+    ctx: CanvasRenderingContext2D,
+    cx: number, cy: number,
+    radius: number,
+    brushData: Uint8ClampedArray | null,
+    size: number,
+    fallbackColor: { r: number, g: number, b: number }
+): { r: number, g: number, b: number, a: number } {
+    if (radius <= 2) {
+        const img = ctx.getImageData(Math.round(cx), Math.round(cy), 1, 1);
+        const a = img.data[3];
+        if (a > 0) {
+            return { r: img.data[0], g: img.data[1], b: img.data[2], a };
+        }
+        return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
+    }
+
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    const rx = Math.round(cx - radius);
+    const ry = Math.round(cy - radius);
+    const rw = Math.round(radius * 2);
+    const rh = Math.round(radius * 2);
+
+    const sx = Math.max(0, Math.min(width - rw, rx));
+    const sy = Math.max(0, Math.min(height - rh, ry));
+    if (rw <= 0 || rh <= 0) {
+        return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
+    }
+
+    const imgData = ctx.getImageData(sx, sy, rw, rh);
+    const data = imgData.data;
+
+    let sumR = 0, sumG = 0, sumB = 0, sumA = 0;
+    let count = 0;
+    let alphaCount = 0;
+
+    const minSamples = Math.min(rw * rh, 64);
+    const maxSamples = Math.min(rw * rh, 256);
+
+    let lastR = 0, lastG = 0, lastB = 0, lastA = 0;
+
+    for (let i = 1; i <= maxSamples; i++) {
+        const hx = Math.floor(halton(i, 2) * rw);
+        const hy = Math.floor(halton(i, 3) * rh);
+
+        const dx = hx - radius;
+        const dy = hy - radius;
+        if (dx * dx + dy * dy <= radius * radius) {
+            const idx = (hy * rw + hx) * 4;
+            if (idx >= 0 && idx < data.length) {
+                let weight = 1;
+                if (brushData && size === rw) {
+                    weight = brushData[idx + 3] / 255;
+                }
+                const pixelAlpha = data[idx + 3] / 255;
+                const totalWeight = weight * pixelAlpha;
+
+                sumR += data[idx] * totalWeight;
+                sumG += data[idx + 1] * totalWeight;
+                sumB += data[idx + 2] * totalWeight;
+                sumA += data[idx + 3] * weight;
+                count += totalWeight;
+                alphaCount += weight;
+            }
+        }
+
+        // Convergence evaluation check
+        if (i >= minSamples && i % 16 === 0 && count > 0) {
+            const currR = sumR / count;
+            const currG = sumG / count;
+            const currB = sumB / count;
+            const currA = sumA / alphaCount;
+
+            if (i > minSamples) {
+                const diff = Math.abs(currR - lastR) + Math.abs(currG - lastG) + Math.abs(currB - lastB) + Math.abs(currA - lastA);
+                if (diff < 2) {
+                    break;
+                }
+            }
+            lastR = currR;
+            lastG = currG;
+            lastB = currB;
+            lastA = currA;
+        }
+    }
+
+    if (count > 0 && alphaCount > 0) {
+        return { r: sumR / count, g: sumG / count, b: sumB / count, a: sumA / alphaCount };
+    }
+    return { r: fallbackColor.r, g: fallbackColor.g, b: fallbackColor.b, a: 0 };
+}
+
+
+declare global {
+    interface ToolRegistry {
+        smudge: typeof SmudgeTool;
+    }
+}
+
+App.registerTool(SmudgeTool);

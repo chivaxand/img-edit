@@ -2,13 +2,15 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 import { INPAINT_ALGORITHMS } from '~/filters/gen/inpaint/inpaint';
-import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
+import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './tools';
 
-App.registerTool({
-    id: 'healing',
+export const HealingTool = {
+    id: 'healing' as const,
     icon: '🩹',
     title: 'Healing Brush',
+    sortOrder: 110,
     settings: { mode: 'auto' as 'auto' | 'manual', algorithm: 'patch_match', algoSettings: {} as Record<string, any>, size: 30, hardness: 50, spacing: 10, alignment: 'none', softness: 0 },
+    requiresEditableLayer: true,
 
     // State
     sourceAnchor: null as { x: number, y: number, layer: Layer } | null,
@@ -252,6 +254,14 @@ App.registerTool({
             if (this.settings.mode === 'auto' && this.autoMaskCanvas) {
                 const l = App.utils.getActive();
                 if (l) {
+                    const sel = App.state.selection;
+                    const hasSel = sel.active && sel.mask && sel.layerId === l.id;
+                    if (hasSel && this.autoMaskCtx) {
+                        this.autoMaskCtx.save();
+                        this.autoMaskCtx.globalCompositeOperation = 'destination-in';
+                        this.autoMaskCtx.drawImage(sel.mask!, 0, 0);
+                        this.autoMaskCtx.restore();
+                    }
                     this.healMask(l, this.autoMaskCanvas);
                 }
                 this.autoMaskCanvas = null;
@@ -291,7 +301,16 @@ App.registerTool({
     stampDabs(layer: Layer, p1: {x: number, y: number}, p2: {x: number, y: number}, isInitial: boolean) {
         const size = this.settings.size;
         const r = size / 2;
-        const spacingPx = Math.max(1, size * (this.settings.spacing / 100));
+        const spacingPx = Math.max(1, this.settings.size * (this.settings.spacing / 100));
+        const sel = App.state.selection;
+        const hasSel = sel.active && sel.mask && sel.layerId === layer.id;
+        let targetCtx = layer.ctx;
+        
+        if (hasSel && App.state.scratch) {
+            targetCtx = App.state.scratch.getContext('2d')!;
+            targetCtx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+        }
+        
         const tCtx = this.tempCanvas!.getContext('2d', { willReadFrequently: true })!;
 
         const stampAt = (px: number, py: number) => {
@@ -381,16 +400,25 @@ App.registerTool({
             tCtx.drawImage(this.brushCanvas!, 0, 0);
             tCtx.globalCompositeOperation = 'source-over';
 
-            layer.ctx.save();
-            layer.ctx.globalCompositeOperation = 'source-over';
-            layer.ctx.drawImage(this.tempCanvas!, Math.round(px - r), Math.round(py - r));
-            layer.ctx.restore();
+            targetCtx.save();
+            targetCtx.globalCompositeOperation = 'source-over';
+            targetCtx.drawImage(this.tempCanvas!, Math.round(px - r), Math.round(py - r));
+            targetCtx.restore();
         };
 
         if (isInitial) {
             stampAt(p1.x, p1.y);
         } else {
             this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
+        }
+        
+        if (hasSel && App.state.scratch) {
+            targetCtx.globalCompositeOperation = 'destination-in';
+            targetCtx.drawImage(sel.mask!, 0, 0);
+            layer.ctx.save();
+            layer.ctx.globalCompositeOperation = 'source-over';
+            layer.ctx.drawImage(App.state.scratch, 0, 0);
+            layer.ctx.restore();
         }
     },
 
@@ -453,4 +481,13 @@ App.registerTool({
 
         drawActiveBrushCircle(this.settings.size);
     }
-});
+};
+
+
+declare global {
+    interface ToolRegistry {
+        healing: typeof HealingTool;
+    }
+}
+
+App.registerTool(HealingTool);

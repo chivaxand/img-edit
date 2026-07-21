@@ -1,23 +1,20 @@
-import { App } from '~/app';
+import { App, PointerCompatibleEvent } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
-import { createBrushCanvas, interpolateDabs, drawActiveBrushCircle } from './basics';
+import { BaseBrushTool, drawBrushCircle, createBrushCanvas } from './tools';
 
-App.registerTool({
-    id: 'clone',
-    icon: '⧉',
-    title: 'Clone Stamp',
-    settings: { size: 40, hardness: 50, spacing: 10, alignment: 'none', alpha: 1.0 },
-    
-    // State
-    sourceAnchor: null as { x: number, y: number, layer: Layer } | null,
-    offset: null as { dx: number, dy: number } | null,
-    distanceAccumulator: 0,
-    
-    // Offscreen canvases for soft brush stamping
-    brushCanvas: null as HTMLCanvasElement | null,
-    tempCanvas: null as HTMLCanvasElement | null,
-    
+export class CloneToolClass extends BaseBrushTool {
+    id = 'clone' as const;
+    icon = '⧉';
+    title = 'Clone Stamp';
+    sortOrder = 100;
+    settings = { size: 40, hardness: 50, spacing: 10, alignment: 'none', alpha: 1.0 };
+    protected accumulateWithinStroke = false;
+
+    protected sourceAnchor: { x: number, y: number, layer: Layer } | null = null;
+    protected offset: { dx: number, dy: number } | null = null;
+    protected tempCanvas: HTMLCanvasElement | null = null;
+
     onSelect(panel: HTMLElement) {
         panel.appendChild(UI.createHint('Alt+Click to set source. Draw to copy pixels.'));
         panel.appendChild(UI.createSliderRow({ label: 'Size', min: 1, max: 200, value: this.settings.size, onInput: (v: string) => this.settings.size = parseInt(v) }));
@@ -33,9 +30,9 @@ App.registerTool({
             ],
             onChange: (v: string) => this.settings.alignment = v
         }));
-    },
-    
-    onMouseDown(e: MouseEvent) {
+    }
+
+    onMouseDown(e: PointerCompatibleEvent) {
         const l = App.utils.getActive();
         if (!l || !l.visible) return;
 
@@ -43,7 +40,7 @@ App.registerTool({
         const lx = App.utils.toLocal(l, pos.x, 'x');
         const ly = App.utils.toLocal(l, pos.y, 'y');
 
-        // Set Source Anchor
+        // Capture Source point
         if (e.altKey) {
             this.sourceAnchor = { x: lx, y: ly, layer: l };
             this.offset = null; 
@@ -55,16 +52,8 @@ App.registerTool({
             alert('Alt+Click to set a source point first.');
             return;
         }
-        
-        if (!App.utils.layerIs(l, 'editable')) {
-            alert('Layer is not editable (rasterize first).'); 
-            return;
-        }
 
-        App.actions.saveState();
-        App.state.isDrawing = true;
-        
-        // Calculate offset if starting a fresh aligned anchor or if using 'none' alignment
+        // Align offset logic
         if (this.settings.alignment === 'none' || !this.offset) {
             this.offset = {
                 dx: lx - this.sourceAnchor.x,
@@ -72,165 +61,92 @@ App.registerTool({
             };
         }
 
-        App.state.last = { x: lx, y: ly };
-
-        // Prepare Brush Mask Canvas
-        const size = this.settings.size;
-        this.brushCanvas = createBrushCanvas(size, this.settings.hardness);
-
-        // Prepare Temporary Stamping Canvas
         this.tempCanvas = document.createElement('canvas');
-        this.tempCanvas.width = size;
-        this.tempCanvas.height = size;
+        this.tempCanvas.width = this.settings.size;
+        this.tempCanvas.height = this.settings.size;
 
-        // Prepare scratch canvas if selection is active
-        const sel = App.state.selection;
-        if (sel.active && sel.mask && sel.layerId === l.id) {
-            App.state.scratch = document.createElement('canvas');
-            App.state.scratch.width = l.canvas.width;
-            App.state.scratch.height = l.canvas.height;
-        } else {
-            App.state.scratch = null;
-        }
+        super.onMouseDown(e);
+    }
 
-        // Draw initial dab and reset spacing accumulator
-        const spacingPx = Math.max(1, this.settings.size * (this.settings.spacing / 100));
-        this.distanceAccumulator = spacingPx;
-        this.stampDabs(l, App.state.last, App.state.last, true);
-        App.emit('render');
-    },
-    
-    onMouseMove(e: MouseEvent) {
-        if (!App.state.isDrawing) return;
-        const l = App.utils.getActive();
-        if (!l) return;
-        
-        const pos = App.utils.getPos(e);
-        const curr = {
-            x: App.utils.toLocal(l, pos.x, 'x'),
-            y: App.utils.toLocal(l, pos.y, 'y')
-        };
+    protected onStrokeEnd() {
+        this.tempCanvas = null;
+    }
 
-        this.stampDabs(l, App.state.last, curr, false);
-        
-        App.state.last = curr;
-        App.emit('render');
-    },
-    
-    onMouseUp() {
-        if (App.state.isDrawing) {
-            App.state.isDrawing = false;
-            App.state.scratch = null;
-            this.brushCanvas = null;
-            this.tempCanvas = null;
-            this.distanceAccumulator = 0;
-        }
-    },
+    protected paintDab(ctx: CanvasRenderingContext2D, cx: number, cy: number, sx: number, sy: number, size: number) {
+        if (!this.offset || !this.sourceAnchor || !this.tempCanvas || !this.brushCanvas) return;
 
-    stampDabs(layer: Layer, p1: {x: number, y: number}, p2: {x: number, y: number}, isInitial: boolean) {
-        const size = this.settings.size;
+        const sourceX = cx - this.offset.dx;
+        const sourceY = cy - this.offset.dy;
         const r = size / 2;
-        const spacingPx = Math.max(1, size * (this.settings.spacing / 100));
-        
-        const sel = App.state.selection;
-        const hasSel = sel.active && sel.mask && sel.layerId === layer.id;
-        let targetCtx = layer.ctx;
-        
-        // If selection is active, we stamp onto a cleared scratchpad for the current segment
-        if (hasSel && App.state.scratch) {
-            targetCtx = App.state.scratch.getContext('2d')!;
-            targetCtx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
-        }
-        
-        const tCtx = this.tempCanvas!.getContext('2d', { willReadFrequently: true })!;
-        
-        const stampAt = (px: number, py: number) => {
-            const sx = px - this.offset!.dx;
-            const sy = py - this.offset!.dy;
-            
-            tCtx.clearRect(0, 0, size, size);
-            
-            // 1. Draw Source Pixels
-            tCtx.drawImage(
-                this.sourceAnchor!.layer.canvas, 
-                Math.round(sx - r), Math.round(sy - r), size, size, 
-                0, 0, size, size
-            );
-                
-            // 2. Mask with Brush Hardness Map
-            tCtx.globalCompositeOperation = 'destination-in';
-            tCtx.drawImage(this.brushCanvas!, 0, 0);
-            tCtx.globalCompositeOperation = 'source-over';
-            
-            // 3. Stamp to Target Context
-            const prevAlpha = targetCtx.globalAlpha;
-            targetCtx.globalAlpha = this.settings.alpha;
-            targetCtx.drawImage(this.tempCanvas!, Math.round(px - r), Math.round(py - r));
-            targetCtx.globalAlpha = prevAlpha;
-        };
 
-        if (isInitial) {
-            stampAt(p1.x, p1.y);
-        } else {
-            this.distanceAccumulator = interpolateDabs(p1, p2, this.distanceAccumulator, spacingPx, stampAt);
-        }
-        
-        // If selection is active, mask the segment scratchpad and merge to layer
-        if (hasSel && App.state.scratch) {
-            targetCtx.globalCompositeOperation = 'destination-in';
-            targetCtx.drawImage(sel.mask!, 0, 0);
-            
-            layer.ctx.globalCompositeOperation = 'source-over';
-            layer.ctx.drawImage(App.state.scratch, 0, 0);
-        }
-    },
+        const tCtx = this.tempCanvas.getContext('2d', { willReadFrequently: true })!;
+        tCtx.clearRect(0, 0, size, size);
+
+        // 1. Draw source
+        tCtx.drawImage(
+            this.sourceAnchor.layer.canvas, 
+            Math.round(sourceX - r), Math.round(sourceY - r), size, size, 
+            0, 0, size, size
+        );
+
+        // 2. Composite with brush mask hardness profile
+        tCtx.globalCompositeOperation = 'destination-in';
+        tCtx.drawImage(this.brushCanvas, 0, 0);
+        tCtx.globalCompositeOperation = 'source-over';
+
+        // 3. Stamp to canvas
+        ctx.drawImage(this.tempCanvas, Math.round(sx), Math.round(sy));
+    }
 
     drawUI() {
         if (this.sourceAnchor) {
             const ctx = App.els.ctx;
             const l = this.sourceAnchor.layer;
-            if (!l.visible) return;
-            
-            let lx = this.sourceAnchor.x;
-            let ly = this.sourceAnchor.y;
-            
-            // Move tracking crosshair dynamically when painting
-            if (this.offset && App.state.isDrawing) {
-                lx = App.state.last.x - this.offset.dx;
-                ly = App.state.last.y - this.offset.dy;
-            }
+            if (l.visible) {
+                let lx = this.sourceAnchor.x;
+                let ly = this.sourceAnchor.y;
+                
+                if (this.offset && App.state.isDrawing) {
+                    lx = App.state.last.x - this.offset.dx;
+                    ly = App.state.last.y - this.offset.dy;
+                }
 
-            const gx = lx * (l.width / l.canvas.width) + l.x;
-            const gy = ly * (l.height / l.canvas.height) + l.y;
+                const gx = lx * (l.width / l.canvas.width) + l.x;
+                const gy = ly * (l.height / l.canvas.height) + l.y;
 
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(gx - 6, gy);
-            ctx.lineTo(gx + 6, gy);
-            ctx.moveTo(gx, gy - 6);
-            ctx.lineTo(gx, gy + 6);
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            
-            // Only render preview size-circle on the static anchor indicator
-            if (lx === this.sourceAnchor.x && ly === this.sourceAnchor.y) {
+                ctx.save();
                 ctx.beginPath();
-                ctx.arc(gx, gy, this.settings.size / 2 * (l.width / l.canvas.width), 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-                ctx.setLineDash([4, 4]);
+                ctx.moveTo(gx - 6, gy);
+                ctx.lineTo(gx + 6, gy);
+                ctx.moveTo(gx, gy - 6);
+                ctx.lineTo(gx, gy + 6);
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
                 ctx.stroke();
-                ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-                ctx.lineDashOffset = 4;
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
                 ctx.stroke();
+                
+                if (lx === this.sourceAnchor.x && ly === this.sourceAnchor.y) {
+                    ctx.beginPath();
+                    ctx.arc(gx, gy, this.settings.size / 2 * (l.width / l.canvas.width), 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+                    ctx.setLineDash([4, 4]);
+                    ctx.stroke();
+                }
+                ctx.restore();
             }
-            
-            ctx.restore();
         }
-
-        drawActiveBrushCircle(this.settings.size);
+        super.drawUI();
     }
-});
+}
+
+export const CloneTool = new CloneToolClass();
+
+declare global {
+    interface ToolRegistry {
+        clone: typeof CloneTool;
+    }
+}
+
+App.registerTool(CloneTool);

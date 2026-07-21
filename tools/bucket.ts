@@ -2,34 +2,53 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
-// Eyedropper Tool
-App.registerTool({
-    id: 'eyedropper',
-    icon: '🎨',
-    title: 'Eyedropper',
+export const BucketTool = {
+    id: 'bucket' as const,
+    icon: '🪣',
+    title: 'Flood Fill (G)',
+    sortOrder: 120,
+    settings: { tolerance: 50, contiguous: true, smoothFill: false, mode: 'fill' },
+
     onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createHint('Left-click for FG, Right-click for BG color.'));
-        if (App.els.canvas) App.els.canvas.oncontextmenu = (e: Event) => e.preventDefault();
+        panel.appendChild(UI.createSliderRow({ label: 'Tolerance', min: 0, max: 255, value: this.settings.tolerance, onInput: (v: string) => this.settings.tolerance = parseInt(v) }));
+        panel.appendChild(UI.createCheckbox({ label: 'Contiguous', value: this.settings.contiguous, onChange: (v: boolean) => this.settings.contiguous = v }));
+        panel.appendChild(UI.createCheckbox({ label: 'Smooth', value: this.settings.smoothFill, onChange: (v: boolean) => this.settings.smoothFill = v }));
+        panel.appendChild(UI.createRadioGroup({
+            label: 'Mode', layout: 'row',
+            options: [
+                { value: 'fill', text: 'Fill Color' },
+                { value: 'cut', text: 'Cut (Erase)' }
+            ],
+            value: this.settings.mode || 'fill',
+            onChange: (v: string) => this.settings.mode = v
+        }));
     },
-    onDeselect() {
-        if (App.els.canvas) App.els.canvas.oncontextmenu = null;
-    },
+
     onMouseDown(e: MouseEvent) {
+        const l = App.utils.getActive();
+        if (!l || !l.visible) return;
+        if (l.type === 'text') { alert('Rasterize text layer first.'); return; }
+
+        App.actions.saveState();
         const pos = App.utils.getPos(e);
-        const ctx = App.els.ctx; // Main display context
-        const p = ctx.getImageData(pos.x, pos.y, 1, 1).data;
-        const hex = App.utils.rgbToHex(p[0], p[1], p[2]);
+        const rgb = App.utils.hexToRgb(App.state.fg);
+        const isCut = this.settings.mode === 'cut';
         
-        if (e.button === 2 || e.altKey) {
-            App.actions.setColor('bg', hex);
-        } else {
-            App.actions.setColor('fg', hex);
-        }
+        performFloodFill(l, pos.x, pos.y, {
+            color: rgb,
+            tolerance: this.settings.tolerance,
+            contiguous: this.settings.contiguous,
+            smooth: this.settings.smoothFill,
+            isSelection: false,
+            cut: isCut
+        });
+        App.recordAction(`api.floodFill(${Math.round(pos.x)}, ${Math.round(pos.y)}, '${App.state.fg}', ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothFill}, ${isCut});`);
+        App.render();
     }
-});
+};
 
 // Shared Flood Fill Logic
-const performFloodFill = (layer: Layer, x: number, y: number, options: any = {}) => {
+export function performFloodFill(layer: Layer, x: number, y: number, options: any = {}) {
     const { 
         color = {r:0, g:0, b:0}, 
         tolerance = 0, 
@@ -68,11 +87,8 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
         }
     }
 
-    // Helper to check match
     const match = (i: number) => {
-        // Selection Constraint
         if (selData && selData[i + 3] === 0) return false;
-        // Color Match
         return App.utils.colorsMatch(data[i], data[i+1], data[i+2], data[i+3], sr, sg, sb, sa, tolerance);
     };
     
@@ -86,8 +102,6 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
         while (stack.length) {
             let [cx, cy] = stack.pop()!;
             let currIdx = (cy * w + cx) * 4;
-
-            // If already processed, skip
             if (maskData[cy * w + cx]) continue;
 
             // Move Left: Find the start of the span
@@ -193,7 +207,6 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
     if (isSelection) {
         return mCanvas;
     } else {
-        // Fill Application
         // Create a solid color canvas
         const cCanvas = document.createElement('canvas');
         cCanvas.width = w; cCanvas.height = h;
@@ -223,80 +236,11 @@ const performFloodFill = (layer: Layer, x: number, y: number, options: any = {})
 // Bind to global utils to allow calls from ScriptAPI without duplication
 (App.utils as any).performFloodFill = performFloodFill;
 
-// Flood Fill Tool
-App.registerTool({
-    id: 'bucket',
-    icon: '🪣',
-    title: 'Flood Fill (G)',
-    settings: { tolerance: 50, contiguous: true, smoothFill: false, mode: 'fill' },
-    onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createSliderRow({ label: 'Tolerance', min: 0, max: 255, value: this.settings.tolerance, onInput: (v: string) => this.settings.tolerance = parseInt(v) }));
-        panel.appendChild(UI.createCheckbox({ label: 'Contiguous', value: this.settings.contiguous, onChange: (v: boolean) => this.settings.contiguous = v }));
-        panel.appendChild(UI.createCheckbox({ label: 'Smooth', value: this.settings.smoothFill, onChange: (v: boolean) => this.settings.smoothFill = v }));
-        panel.appendChild(UI.createRadioGroup({
-            label: 'Mode', layout: 'row',
-            options: [
-                { value: 'fill', text: 'Fill Color' },
-                { value: 'cut', text: 'Cut (Erase)' }
-            ],
-            value: this.settings.mode || 'fill',
-            onChange: (v: string) => this.settings.mode = v
-        }));
-    },
-    onMouseDown(e: MouseEvent) {
-        const l = App.utils.getActive();
-        if (!l || !l.visible) return;
-        if (l.type === 'text') { alert('Rasterize text layer first.'); return; }
 
-        App.actions.saveState();
-        const pos = App.utils.getPos(e);
-        const rgb = App.utils.hexToRgb(App.state.fg);
-        const isCut = this.settings.mode === 'cut';
-        
-        performFloodFill(l, pos.x, pos.y, {
-            color: rgb,
-            tolerance: this.settings.tolerance,
-            contiguous: this.settings.contiguous,
-            smooth: this.settings.smoothFill,
-            isSelection: false,
-            cut: isCut
-        });
-        App.recordAction(`api.floodFill(${Math.round(pos.x)}, ${Math.round(pos.y)}, '${App.state.fg}', ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothFill}, ${isCut});`);
-        App.render();
+declare global {
+    interface ToolRegistry {
+        bucket: typeof BucketTool;
     }
-});
+}
 
-// Magic Wand Tool
-App.registerTool({
-    id: 'wand',
-    icon: '🪄',
-    title: 'Magic Wand (W)',
-    settings: { tolerance: 32, contiguous: true, smoothSelect: false },
-    onSelect(panel: HTMLElement) {
-        panel.appendChild(UI.createSliderRow({ label: 'Tolerance', min: 0, max: 255, value: this.settings.tolerance, onInput: (v: string) => this.settings.tolerance = parseInt(v) }));
-        panel.appendChild(UI.createCheckbox({ label: 'Contiguous', value: this.settings.contiguous, onChange: (v: boolean) => this.settings.contiguous = v }));
-        panel.appendChild(UI.createCheckbox({ label: 'Smooth', value: this.settings.smoothSelect, onChange: (v: boolean) => this.settings.smoothSelect = v }));
-        panel.appendChild(UI.createHint('Click to select area.'));
-    },
-    onMouseDown(e: MouseEvent) {
-        const l = App.utils.getActive();
-        if (!l || !l.visible) return;
-        
-        const pos = App.utils.getPos(e);
-        const mask = performFloodFill(l, pos.x, pos.y, {
-            tolerance: this.settings.tolerance,
-            contiguous: this.settings.contiguous,
-            smooth: this.settings.smoothSelect,
-            isSelection: true
-        });
-        
-        if (mask) {
-            App.state.selection.layerId = l.id;
-            App.state.selection.mask = mask;
-            App.state.selection.ctx = mask.getContext('2d', { willReadFrequently: true });
-            App.state.selection.active = true;
-            App.recordAction(`api.magicWandSelect(${Math.round(pos.x)}, ${Math.round(pos.y)}, ${this.settings.tolerance}, ${this.settings.contiguous}, ${this.settings.smoothSelect});`);
-            App.render();
-        }
-    }
-});
+App.registerTool(BucketTool);

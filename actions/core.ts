@@ -1,12 +1,13 @@
-import { App, AppActions } from '~/app';
+import { App, AppActions, ToolId } from '~/app';
 import { UI } from '~/ui';
+import { Lib } from '~/libs/index';
 
 export const coreActions: Pick<AppActions, 
     'saveState' | 'undo' | 'resizeCanvas' | 'fitCanvasToLayers' | 
     'setTool' | 'setColor' | 'download' | 'setZoom' | 
-    'stepZoom' | 'exportBase64' | 'closeImage'
+    'stepZoom' | 'exportBase64' | 'closeImage' | 'openRevertHistoryDialog'
 > = {
-    saveState() { App.history.push(App.state); },
+    saveState(label?: string) { App.history.push(App.state, label); },
 
     undo() {
         const h = App.history.pop();
@@ -73,7 +74,7 @@ export const coreActions: Pick<AppActions,
         App.emit('layer:props');
     },
 
-    setTool(t: string) {
+    setTool(t: ToolId) {
         const oldTool = App.getTool();
         if (oldTool && oldTool.onDeselect) oldTool.onDeselect();
         App.state.tool = t;
@@ -155,10 +156,128 @@ export const coreActions: Pick<AppActions,
             App.state.layers = [firstLayer];
             App.actions.setActiveLayer(firstLayer.id);
         }
-        App.actions.setTool('move');
+        App.actions.setTool('pointer');
 
         App.emit('layers:structure');
         App.emit('layer:props');
         App.render();
+    },
+
+    openRevertHistoryDialog() {
+        if (App.history.stack.length === 0) {
+            alert("No history states recorded yet.");
+            return;
+        }
+
+        const stateOptions = App.history.stack.map((state, idx) => ({
+            value: state.id,
+            text: `${idx + 1}. ${state.label}`
+        }));
+
+        let selectedStateId = App.history.stack[App.history.stack.length - 1].id;
+
+        const selectRow = UI.createSelectRow({
+            label: 'Revert before', options: stateOptions, value: selectedStateId,
+            onChange: (v: string) => { selectedStateId = parseInt(v, 10); }
+        });
+
+        let addCurrentActive = true;
+        const addCurrentCheckbox = UI.createCheckbox({
+            label: 'Add current active layer as a new layer after revert',
+            value: addCurrentActive,
+            onChange: (v: boolean) => { addCurrentActive = v; }
+        });
+
+        const layout = UI.createNode('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            UI.createHint('Revert the image to a selected history state.'),
+            selectRow,
+            addCurrentCheckbox,
+            UI.createNode('div', { className: 'popup-actions' },
+                UI.createButton({ label: 'Cancel', className: 'btn cancel-btn', onClick: () => App.popup!.close() }),
+                UI.createButton({ label: 'Revert', onClick: () => {
+                    const chosenState = App.history.stack.find(s => s.id === selectedStateId);
+                    if (!chosenState) {
+                        alert("Invalid history state selected.");
+                        return;
+                    }
+                    App.popup!.close();
+
+                    // Save state so the revert action itself is undoable
+                    App.actions.saveState(`Revert to ${chosenState.label}`);
+
+                    // Deep copy of the current active layer before reverting
+                    const activeL = App.utils.getActive();
+                    let clonedActiveLayer: any = null;
+                    if (activeL) {
+                        const canvasCopy = document.createElement('canvas');
+                        canvasCopy.width = activeL.canvas.width;
+                        canvasCopy.height = activeL.canvas.height;
+                        canvasCopy.getContext('2d')!.drawImage(activeL.canvas, 0, 0);
+                        
+                        clonedActiveLayer = {
+                            ...activeL,
+                            id: Date.now() + Math.random(),
+                            name: `${activeL.name} (Snapshot)`,
+                            canvas: canvasCopy,
+                            ctx: canvasCopy.getContext('2d')!
+                        };
+                    }
+
+                    // Revert to chosenState
+                    App.state.width = chosenState.w;
+                    App.state.height = chosenState.h;
+                    App.state.layers = chosenState.layers.map((l: any) => {
+                        const c = document.createElement('canvas');
+                        c.width = l.canvas.width;
+                        c.height = l.canvas.height;
+                        c.getContext('2d')!.drawImage(l.canvas, 0, 0);
+                        return { ...l, canvas: c, ctx: c.getContext('2d')! };
+                    });
+
+                    // Restore selection state safely
+                    if (chosenState.selection) {
+                        App.state.selection.active = chosenState.selection.active;
+                        App.state.selection.layerId = chosenState.selection.layerId;
+                        if (chosenState.selection.mask) {
+                            const maskCopy = document.createElement('canvas');
+                            maskCopy.width = chosenState.selection.mask.width;
+                            maskCopy.height = chosenState.selection.mask.height;
+                            maskCopy.getContext('2d')!.drawImage(chosenState.selection.mask, 0, 0);
+                            App.state.selection.mask = maskCopy;
+                            App.state.selection.ctx = maskCopy.getContext('2d');
+                        } else {
+                            App.state.selection.mask = null;
+                            App.state.selection.ctx = null;
+                        }
+                        App.state.selection.outline = null;
+                    } else {
+                        App.state.selection.active = false;
+                        App.state.selection.mask = null;
+                        App.state.selection.ctx = null;
+                        App.state.selection.layerId = null;
+                        App.state.selection.outline = null;
+                    }
+
+                    App.actions.resizeCanvas(chosenState.w, chosenState.h);
+
+                    // Add current active layer copy back if checked
+                    if (addCurrentActive && clonedActiveLayer) {
+                        App.state.layers.unshift(clonedActiveLayer);
+                        App.actions.setActiveLayer(clonedActiveLayer.id);
+                    } else if (App.state.layers.length > 0) {
+                        App.actions.setActiveLayer(App.state.layers[0].id);
+                    }
+
+                    App.emit('layers:structure');
+                    App.emit('layer:props');
+                    App.render();
+                }})
+            )
+        );
+
+        App.popup!.setHtml('<h3>Revert to History State</h3>');
+        App.popup!.content.innerHTML = '';
+        App.popup!.content.appendChild(layout);
+        App.popup!.show();
     }
 };

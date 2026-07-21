@@ -27,7 +27,7 @@ export interface AppState {
     height: number;
     layers: Layer[];
     activeLayerId: number | null;
-    tool: string;
+    tool: ToolId;
     fg: string;
     bg: string;
     settings: Record<string, any>;
@@ -65,12 +65,19 @@ export interface AppState {
     [key: string]: any;
 }
 
+declare global { interface ToolRegistry { /* Dynamically extended by tools */ } }
+export type ToolId = keyof ToolRegistry;
+
 export interface ToolDef {
-    id: string;
+    id: ToolId;
     icon: string;
     title: string;
+    sortOrder: number;
     settings?: any;
     finishOnLayerSwitch?: boolean;
+    isSelectionTool?: boolean;
+    requiresEditableLayer?: boolean;
+    customCursorStyle?: string;
     onSelect?: (panel: HTMLElement) => void;
     onDeselect?: () => void;
     onMouseDown?: (e: PointerCompatibleEvent) => void;
@@ -84,7 +91,7 @@ export interface ToolDef {
 }
 
 export interface AppActions {
-    saveState(): void;
+    saveState(label?: string): void;
     undo(): void;
     resizeCanvas(w: string | number | null, h: string | number | null): void;
     fitCanvasToLayers(): void;
@@ -98,7 +105,7 @@ export interface AppActions {
     deleteLayer(): void;
     setActiveLayer(id: number): void;
     toggleVis(id: number): void;
-    setTool(t: string): void;
+    setTool(t: ToolId): void;
     setColor(type: string, val: string): void;
     setLayerProp(k: string, v: any): void;
     transformLayer(k: string, v: string): void;
@@ -130,6 +137,7 @@ export interface AppActions {
     copy(): void;
     paste(e?: ClipboardEvent): Promise<void>;
     closeImage(): void;
+    openRevertHistoryDialog(): void;
 }
 
 export const App = {
@@ -137,8 +145,8 @@ export const App = {
         width: 800, height: 600,
         layers: [],
         activeLayerId: null,
-        tool: 'move',
-        fg: '#000000', bg: '#ffffff',
+        tool: 'pointer',
+        fg: '#ee1010', bg: '#ffffff',
         settings: {}, 
         isDrawing: false, start: {x:0, y:0}, dragOffset: {x:0, y:0},
         zoom: 1,
@@ -162,6 +170,10 @@ export const App = {
     } as AppState,
     els: {} as Record<string, any>,
     tools: [] as ToolDef[],
+    macroCommands: {} as Record<string, Function>,
+    registerMacroCommand(name: string, fn: Function) {
+        this.macroCommands[name] = fn;
+    },
     listeners: {} as Record<string, Function[]>,
     popup: null as Popup | null,
     FullScreenWorkspace: FullScreenWorkspace,
@@ -196,7 +208,8 @@ export const App = {
     history: {
         stack: [] as any[],
         limit: 20,
-        push(state: AppState) {
+        counter: 0,
+        push(state: AppState, label?: string) {
             if (this.stack.length >= this.limit) this.stack.shift();
             const copy = state.layers.map(l => {
                 const c = document.createElement('canvas'); 
@@ -214,7 +227,10 @@ export const App = {
                 maskCopy.getContext('2d')!.drawImage(state.selection.mask, 0, 0);
             }
 
+            const stateId = ++this.counter;
             this.stack.push({
+                id: stateId,
+                label: label || `Action ${stateId}`,
                 w: state.width,
                 h: state.height,
                 layers: copy,
@@ -224,6 +240,7 @@ export const App = {
                     mask: maskCopy
                 }
             });
+            App.emit('history:update');
         },
         pop() { return this.stack.pop(); }
     },
@@ -240,7 +257,10 @@ export const App = {
     },
 
     registerTool(toolDef: ToolDef) { this.tools.push(toolDef); },
-    getTool() { return this.tools.find(t => t.id === this.state.tool); },
+    getTool<K extends ToolId = never>(id?: K): [K] extends [never] ? ToolDef : (K extends keyof ToolRegistry ? ToolRegistry[K] : ToolDef) {
+        const targetId = id || this.state.tool;
+        return this.tools.find(t => t.id === targetId) as any;
+    },
 
     init() {
         this.els.canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
@@ -310,7 +330,7 @@ export const App = {
         this.keybinds.register('-', () => this.actions.stepZoom(-1));
         this.keybinds.register('0, *', () => this.actions.setZoom(1));
         this.keybinds.register('delete, backspace', () => { if(App.state.selection.active) this.actions.deleteSelection(); });
-        this.keybinds.register('escape', () => { this.actions.deselect(); this.actions.setTool('move'); });
+        this.keybinds.register('escape', () => { this.actions.deselect(); this.actions.setTool('pointer'); });
 
         window.addEventListener('keydown', (e: KeyboardEvent) => {
             const tool = this.getTool();
@@ -323,7 +343,7 @@ export const App = {
         window.addEventListener('mousemove', this.events.onMouseMove);
         window.addEventListener('mouseup', this.events.onMouseUp);
         this.els.canvas.addEventListener('dblclick', this.events.onDoubleClick);
-        this.els.canvas.addEventListener('contextmenu', this.events.onContextMenu);
+        this.els.workspace.addEventListener('contextmenu', this.events.onContextMenu);
 
         // Touch event bindings for touch/mobile devices
         this.els.canvas.addEventListener('touchstart', this.events.onTouchStart.bind(this.events), { passive: false });
@@ -354,7 +374,7 @@ export const App = {
         });
 
         // Select default tool
-        this.actions.setTool('move');
+        this.actions.setTool('pointer');
     },
 
     bindEvents() {
@@ -408,6 +428,9 @@ export const App = {
             this.emit('zoom:change');
             this.render();
         });
+        this.on('history:update', () => {
+            this.ui.updateToolSettings();
+        });
         this.on('record:update', () => {
             const headerEl = document.getElementById('app-header') || document.getElementById('header-controls') || document.querySelector('.header');
             if (headerEl) {
@@ -424,6 +447,7 @@ export const App = {
 
         // Toolbar
         const tb = document.getElementById('toolbar')!;
+        this.tools.sort((a, b) => (a.sortOrder ?? 1000) - (b.sortOrder ?? 1000));
         this.tools.forEach(t => {
             const btn = UI.createNode('button', { 
                 className: `icon-btn ${t.id===this.state.tool?'active':''}`, 
@@ -439,8 +463,8 @@ export const App = {
             UI.createNode('button', { className: 'btn', style:{position:'absolute', top:'-15px', right:'-5px', fontSize:'10px', padding:'0'}, textContent:'⇄', on:{click:swap} }),
             UI.createNode('div', { id:'bg-wrap', className:'c-swatch', style:{bottom:'0', right:'0', background:'#fff'} }, 
                 UI.createInput('color', { value:'#ffffff' }, (t: HTMLInputElement) => this.actions.setColor('bg', t.value))),
-            UI.createNode('div', { id:'fg-wrap', className:'c-swatch', style:{top:'0', left:'0', background:'#000'} }, 
-                UI.createInput('color', { value:'#000000' }, (t: HTMLInputElement) => this.actions.setColor('fg', t.value)))
+            UI.createNode('div', { id:'fg-wrap', className:'c-swatch', style:{top:'0', left:'0', background:'#ee1010'} }, 
+                UI.createInput('color', { value:'#ee1010' }, (t: HTMLInputElement) => this.actions.setColor('fg', t.value)))
         );
         tb.appendChild(cBox);
 
@@ -593,7 +617,7 @@ export const App = {
                 }
                 
                 // If selection is active, and Ctrl/Cmd is pressed, and we are in a selection tool, move the selection
-                if (App.state.selection.active && App.state.selection.mask !== null && (e.ctrlKey || e.metaKey) && ['select', 'lasso', 'select-brush'].includes(App.state.tool)) {
+                if (App.state.selection.active && App.state.selection.mask !== null && (e.ctrlKey || e.metaKey) && t?.isSelectionTool) {
                     App.actions.saveState();
                     App.state.movingSelection = true;
                     App.state.lastMovePos = { x: pos.x, y: pos.y };
@@ -680,8 +704,7 @@ export const App = {
             }
         },
         onDoubleClick(e: MouseEvent) { const t = App.getTool(); if (t && t.onDoubleClick) t.onDoubleClick(e as any); },
-        onContextMenu(e: MouseEvent) { const t = App.getTool(); if (t && t.onContextMenu) t.onContextMenu(e as any); },
-
+        onContextMenu(e: MouseEvent) { e.preventDefault(); const t = App.getTool(); if (t && t.onContextMenu) t.onContextMenu(e as any); },
         onTouchStart(e: TouchEvent) {
             if (e.touches.length > 0) {
                 const norm = App.utils.normalizeTouch(e, 'down');

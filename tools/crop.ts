@@ -2,10 +2,11 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
-App.registerTool({
-    id: 'crop',
+export const CropTool = {
+    id: 'crop' as const,
     icon: '✂',
     title: 'Crop Tool',
+    sortOrder: 70,
     
     // State
     rect: { x:0, y:0, w:0, h:0 } as Record<string, number>,
@@ -57,8 +58,8 @@ App.registerTool({
         App.actions.resizeCanvas(r.w, r.h);
         App.recordAction(`api.crop(${r.x}, ${r.y}, ${r.w}, ${r.h});`);
 
-        // Reset tool to move
-        App.actions.setTool('move');
+        // Reset tool to default
+        App.actions.setTool('pointer');
     },
 
     drawUI() {
@@ -184,4 +185,13 @@ App.registerTool({
     onDoubleClick() {
         this.apply();
     }
-});
+};
+
+
+declare global {
+    interface ToolRegistry {
+        crop: typeof CropTool;
+    }
+}
+
+App.registerTool(CropTool);

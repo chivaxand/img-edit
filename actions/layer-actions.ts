@@ -18,7 +18,7 @@ export const layersActions: Pick<AppActions,
     },
 
     addLayer(l: Layer) { 
-        App.actions.saveState(); 
+        App.actions.saveState("Add Layer"); 
         App.state.layers.unshift(l); 
         App.actions.setActiveLayer(l.id); 
     },
@@ -48,7 +48,7 @@ export const layersActions: Pick<AppActions,
     rasterizeLayer(id: number) {
         const l = App.state.layers.find(x=>x.id===id);
         if(!l || l.type !== 'text') return;
-        App.actions.saveState();
+        App.actions.saveState("Rasterize Text Layer");
         const newL = Layers.create('raster', { name:l.name, img:l.canvas })!;
         Object.assign(newL, { x:l.x, y:l.y, opacity:l.opacity, blend:l.blend, visible:l.visible, id:l.id });
         const idx = App.state.layers.indexOf(l);
@@ -58,7 +58,7 @@ export const layersActions: Pick<AppActions,
 
     deleteLayer() {
         if(App.state.layers.length<=1) return;
-        App.actions.saveState();
+        App.actions.saveState("Delete Layer");
         App.state.layers = App.state.layers.filter(l => l.id !== App.state.activeLayerId);
         App.actions.setActiveLayer(App.state.layers[0].id);
         App.recordAction("api.deleteActiveLayer();");
@@ -67,7 +67,7 @@ export const layersActions: Pick<AppActions,
     setActiveLayer(id: number) { 
         const currentTool = App.getTool();
         if (currentTool && currentTool.finishOnLayerSwitch && App.state.activeLayerId !== id) {
-            App.actions.setTool('move');
+            App.actions.setTool('pointer');
         }
         App.state.activeLayerId = id; 
         const index = App.state.layers.findIndex(x => x.id === id);
@@ -104,7 +104,7 @@ export const layersActions: Pick<AppActions,
     centerActiveLayer() {
         const l = App.utils.getActive();
         if (!l) return;
-        App.actions.saveState();
+        App.actions.saveState("Center Active Layer");
         l.x = Math.round((App.state.width - l.width) / 2);
         l.y = Math.round((App.state.height - l.height) / 2);
         App.emit('layer:props');
@@ -132,7 +132,7 @@ export const layersActions: Pick<AppActions,
     },
 
     mergeAll() {
-        App.actions.saveState();
+        App.actions.saveState("Merge All Layers");
         const c = Lib.canvas.renderMerged(App.state.layers, App.state.width, App.state.height);
         const newLayer = App.actions.createLayer('Merged', c);
         if (newLayer) {
@@ -145,7 +145,7 @@ export const layersActions: Pick<AppActions,
     duplicateLayer() {
         const l = App.utils.getActive();
         if (!l) return;
-        App.actions.saveState();
+        App.actions.saveState("Duplicate Layer");
 
         const nc = Lib.canvas.clone(l.canvas);
 
@@ -175,7 +175,7 @@ export const layersActions: Pick<AppActions,
 
         if (ni < 0 || ni >= App.state.layers.length) return;
 
-        App.actions.saveState();
+        App.actions.saveState(dir === -1 ? "Move Layer Up" : "Move Layer Down");
 
         // Swap
         [App.state.layers[i], App.state.layers[ni]] = [App.state.layers[ni], App.state.layers[i]];
@@ -190,7 +190,7 @@ export const layersActions: Pick<AppActions,
         const idx = App.state.layers.indexOf(l);
         if (idx < 0 || idx >= App.state.layers.length - 1) return;
 
-        App.actions.saveState();
+        App.actions.saveState("Merge Layer Down");
 
         const bottomLayer = App.state.layers[idx + 1];
         const temp = document.createElement('canvas');

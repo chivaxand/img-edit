@@ -2,10 +2,11 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
-App.registerTool({
-    id: 'transform',
+export const TransformTool = {
+    id: 'transform' as const,
     title: 'Free Transform',
     icon: '⤢',
+    sortOrder: 190,
     finishOnLayerSwitch: true,
     
     // State
@@ -132,7 +133,7 @@ App.registerTool({
         this.active = false;
         this.layer = null;
         
-        App.actions.setTool('move');
+        App.actions.setTool('pointer');
         App.render();
     },
 
@@ -312,4 +313,13 @@ App.registerTool({
         }
         return false;
     }
-});
+};
+
+
+declare global {
+    interface ToolRegistry {
+        transform: typeof TransformTool;
+    }
+}
+
+App.registerTool(TransformTool);

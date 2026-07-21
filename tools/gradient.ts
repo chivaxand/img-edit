@@ -2,10 +2,11 @@ import { App } from '~/app';
 import { UI } from '~/ui';
 import { Layer } from '~/layers';
 
-App.registerTool({
-    id: 'gradient',
+export const GradientTool = {
+    id: 'gradient' as const,
     icon: '🌈',
     title: 'Gradient Tool (G)',
+    sortOrder: 130,
     settings: { type: 'linear', colors: 'fg-bg', strict: false },
 
     startPos: null as { x: number, y: number } | null,
@@ -168,4 +169,13 @@ App.registerTool({
         this.startPos = null;
         App.render();
     }
-});
+};
+
+
+declare global {
+    interface ToolRegistry {
+        gradient: typeof GradientTool;
+    }
+}
+
+App.registerTool(GradientTool);
